@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 
 from support_copilot.config import db_url
 from support_copilot.db.seed import seed
+from support_copilot.retrieval.tfidf import KnowledgeIndex, load_chunks
 
 
 @pytest.fixture(scope="session")
@@ -21,3 +22,14 @@ def engine(seeded_db):
     engine = create_engine(db_url())
     yield engine
     engine.dispose()
+
+
+@pytest.fixture
+def conn(engine):
+    with engine.connect() as connection:
+        yield connection
+
+
+@pytest.fixture
+def index(conn):
+    return KnowledgeIndex(load_chunks(conn))
