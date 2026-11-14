@@ -1,0 +1,17 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.sqlite3
+
+# node
+node_modules/
+dist/
+
+# local tooling
+.claude/
+CLAUDE.md
+customer_support_data.zip
+.DS_Store
