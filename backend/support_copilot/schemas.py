@@ -110,6 +110,8 @@ class Citation(BaseModel):
     chunk_id: str | None = None  # KB-03#chunk-1 for articles
     title: str
     quote: str  # verbatim text taken from the source
+    score: float | None = None  # retrieval score of the quote (None for the ticket itself)
+    excerpt: str | None = None  # the whole chunk the quote came from, for context in the UI
 
 
 class Answer(BaseModel):

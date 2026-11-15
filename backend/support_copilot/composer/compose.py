@@ -90,8 +90,10 @@ def _select_evidence(result: KnowledgeSearchResult) -> tuple[list[Citation], str
             chunk_id=hit.chunk_id,
             title=hit.title,
             quote=sentence,
+            score=score,
+            excerpt=hit.excerpt,
         )
-        for _, hit, _, sentence in chosen
+        for score, hit, _, sentence in chosen
     ], None
 
 
@@ -155,7 +157,11 @@ def compose_similar_tickets(matches: list[SimilarTicket]) -> Answer:
         return _insufficient("similar_tickets", "No resolved ticket matched the search terms.")
     citations = [
         Citation(
-            source_type="ticket", source_id=m.ticket_id, title=m.title, quote=m.resolution_summary
+            source_type="ticket",
+            source_id=m.ticket_id,
+            title=m.title,
+            quote=m.resolution_summary,
+            score=m.score,
         )
         for m in matches
     ]

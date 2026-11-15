@@ -48,3 +48,10 @@ One line per decision, with the reason. Used for the review walkthrough.
 - **Ticket list/detail/reviewed use SQLAlchemy directly, not MCP** — the MCP server is read-only by design; the only write (reviewed) and the run log belong to the API.
 - **Run record written in `finally`, metadata only** — every validated request is logged, success or failure, without storing query or ticket text. Requests rejected with 422 never reach the handler and are not recorded.
 - **`top_k` fixed at 3 in the API and passed explicitly** — the retrieval metadata in the response is then what was actually asked for.
+- **Frontend is hand-written Vite + React + TS, no UI or data-fetching library** — three panels and four endpoints; a small `useLoad` hook covers loading/error/ready and drops stale responses.
+- **Vite dev proxy for `/api` and `/health` instead of CORS** — the browser only talks to one origin, so the API needs no CORS policy to get wrong.
+- **The form does not duplicate request rules; the server's 422 message is shown as the validation error** — one source of truth (`AssistantRequest`), and the validation state is real, not simulated.
+- **`Citation` gained optional `score` and `excerpt`** — the UI must show a score and an expandable passage per citation, and both already existed in the evidence; nothing new is computed.
+- **Answer is cleared when the ticket or action changes; draft editor is keyed by `run_id`** — a draft for one ticket can never sit next to another ticket, and a new run replaces old edits.
+- **No send button exists; the draft carries a permanent "Draft — not sent" label and only a Copy action** — the brief's boundary is enforced by absence, not by a disabled control.
+- **System fonts and no CDN assets** — the UI must render with the network off.
