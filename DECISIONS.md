@@ -36,3 +36,15 @@ One line per decision, with the reason. Used for the review walkthrough.
 - **`search_knowledge` does not expose the threshold** — a caller cannot lower the evidence bar; it is reported in the result instead.
 - **`NullPool` + one connection per tool call** — no connection is shared across threads if the SDK runs sync tools in a worker; cost is negligible for SQLite.
 - **Tools carry read-only annotations (`read_only_hint`, not destructive, idempotent, closed-world)** — the SDK default advertises tools as possibly destructive, which the Inspector showed; hints are metadata only, the read-only connection remains the guarantee.
+- **One MCP stdio session opened in the FastAPI lifespan (`McpGateway`)** — the stdio client uses anyio task groups and must be entered and exited by the same task; per-request sessions would also pay a process start each call.
+- **MCP failure is fail-fast 503, no restart-and-retry** — a restart would have to run inside the lifespan task, and a silent retry can hide a crashing server; `/health` reports `mcp_ready=false` and ticket routes keep working.
+- **App still starts if the MCP server cannot start** — the queue stays usable and the failure is visible in `/health` instead of a boot crash.
+- **10 s read timeout on MCP calls** — a hung server becomes a 503, not a hung request.
+- **Readiness check is a real `list_tools` round trip** — protocol `ping` is removed in SDK v2 (2026-07-28 spec), and a cached flag would not notice a dead process.
+- **One fixed flow per action in a dict keyed by the `Action` enum** — ticket and article text only travels as tool arguments or quoted evidence, so it cannot select a tool.
+- **Per-action required fields checked in a model validator; `extra="forbid"` on the request and on `TicketFilter`** — bad or unknown input is a 422 before any tool runs, rather than being ignored.
+- **Query limit 500 chars** — same bound as the MCP tools, so the API never forwards something the server would reject.
+- **API re-validates MCP results into the shared pydantic models** — a contract drift between server and API fails loudly instead of producing a malformed answer.
+- **Ticket list/detail/reviewed use SQLAlchemy directly, not MCP** — the MCP server is read-only by design; the only write (reviewed) and the run log belong to the API.
+- **Run record written in `finally`, metadata only** — every validated request is logged, success or failure, without storing query or ticket text. Requests rejected with 422 never reach the handler and are not recorded.
+- **`top_k` fixed at 3 in the API and passed explicitly** — the retrieval metadata in the response is then what was actually asked for.

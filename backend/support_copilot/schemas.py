@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 Status = Literal["open", "resolved"]
 Priority = Literal["low", "medium", "high"]
@@ -55,6 +55,8 @@ class SimilarTicketsResult(BaseModel):
 
 class TicketFilter(BaseModel):
     """Allowed count filters. Values are enums, so no free text ever reaches SQL."""
+
+    model_config = ConfigDict(extra="forbid")  # an unknown filter is an error, not ignored
 
     status: Status | None = None
     priority: Priority | None = None
