@@ -35,3 +35,4 @@ One line per decision, with the reason. Used for the review walkthrough.
 - **Input bounds in the tool signature (query 1–500 chars, `top_k`/`limit` 1–10, ID patterns, enum categories)** — the SDK rejects bad input before our code runs, and the bounds appear in the tool schema.
 - **`search_knowledge` does not expose the threshold** — a caller cannot lower the evidence bar; it is reported in the result instead.
 - **`NullPool` + one connection per tool call** — no connection is shared across threads if the SDK runs sync tools in a worker; cost is negligible for SQLite.
+- **Tools carry read-only annotations (`read_only_hint`, not destructive, idempotent, closed-world)** — the SDK default advertises tools as possibly destructive, which the Inspector showed; hints are metadata only, the read-only connection remains the guarantee.

@@ -25,6 +25,14 @@ async def test_lists_four_tools_and_two_resource_templates(server):
     assert templates == {"support://tickets/{ticket_id}", "support://knowledge/{article_id}"}
 
 
+async def test_every_tool_is_advertised_as_read_only(server):
+    async with Client(server) as client:
+        tools = (await client.list_tools()).tools
+    for tool in tools:
+        assert tool.annotations.read_only_hint is True, tool.name
+        assert tool.annotations.destructive_hint is False, tool.name
+
+
 async def test_get_ticket_returns_structured_ticket_and_typed_not_found(server):
     async with Client(server) as client:
         hit = await client.call_tool("get_ticket", {"ticket_id": "T-101"})

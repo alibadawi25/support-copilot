@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated
 
 from mcp.server import MCPServer
+from mcp_types import ToolAnnotations
 from pydantic import Field
 from sqlalchemy import text
 
@@ -41,6 +42,12 @@ TicketId = Annotated[str, Field(pattern=r"^T-\d{1,6}$", description="Ticket ID, 
 ArticleId = Annotated[str, Field(pattern=r"^KB-\d{1,6}$", description="Article ID, e.g. KB-03")]
 Limit = Annotated[int, Field(ge=1, le=10, description="Maximum number of results")]
 
+# Hints for clients (the SDK default advertises tools as possibly destructive).
+# They are metadata only; the real guarantee is the read-only connection.
+READ_ONLY = ToolAnnotations(
+    read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+)
+
 
 def build_server(database: Path | None = None) -> MCPServer:
     """Create the server with its read-only engine and the TF-IDF index built once."""
@@ -51,14 +58,14 @@ def build_server(database: Path | None = None) -> MCPServer:
 
     mcp = MCPServer("support-copilot")
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     def get_ticket(ticket_id: TicketId) -> TicketLookup:
         """Fetch one ticket with its message timeline. Unknown IDs return found=false."""
         with engine.connect() as conn:
             ticket = ticket_queries.get_ticket(conn, ticket_id)
         return TicketLookup(found=ticket is not None, ticket=ticket)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     def search_knowledge(
         query: Query, category: Category | None = None, top_k: Limit = 3
     ) -> KnowledgeSearchResult:
@@ -70,7 +77,7 @@ def build_server(database: Path | None = None) -> MCPServer:
         """
         return index.search(query, category=category, top_k=top_k)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     def search_resolved_tickets(
         query: Query,
         exclude_ticket_id: TicketId | None = None,
@@ -84,7 +91,7 @@ def build_server(database: Path | None = None) -> MCPServer:
             )
         return SimilarTicketsResult(tickets=found)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     def count_tickets(
         status: Status | None = None,
         priority: Priority | None = None,
