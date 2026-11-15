@@ -48,6 +48,11 @@ class SimilarTicket(BaseModel):
     score: float  # higher is better (negated bm25)
 
 
+class SimilarTicketsResult(BaseModel):
+    tickets: list[SimilarTicket]  # resolved tickets only, best first
+    method: str = "fts5_bm25"
+
+
 class TicketFilter(BaseModel):
     """Allowed count filters. Values are enums, so no free text ever reaches SQL."""
 
@@ -76,6 +81,22 @@ class TicketView(BaseModel):
     status: str
     messages: list[TicketMessageView]
     resolution_summary: str | None = None
+
+
+class TicketLookup(BaseModel):
+    """get_ticket result. An unknown ID is a normal outcome, not a tool failure."""
+
+    found: bool
+    ticket: TicketView | None = None
+
+
+class ArticleView(BaseModel):
+    id: str
+    title: str
+    category: str
+    tags: list[str]
+    updated_at: str
+    body: str
 
 
 # ---- composer output ---------------------------------------------------------

@@ -28,3 +28,10 @@ One line per decision, with the reason. Used for the review walkthrough.
 - **`TicketFilter` uses Literal enums** — invalid values fail validation before any SQL is built; column names come from the model's own field names, values are bound parameters.
 - **No synonym map (MFA vs "multi-factor authentication")** — left as a documented limitation of sparse retrieval; ticket titles happen to carry the shared word "authenticator".
 - **Injection defence is structural** — ticket/article text is only ever interpolated into quoted output; no code path parses it for actions, so there is nothing for an injected instruction to steer.
+- **MCP server returns evidence only; composer stays in the API** — matches the brief's wording and means the server process cannot produce answer text at all.
+- **`build_server(db)` factory, tools as closures** — engine and TF-IDF index are built once at startup and tests run the same server in-process via `Client(server)` with no module-level state.
+- **Read-only at two layers: `file:…?mode=ro` URI and `PRAGMA query_only = ON`** — independent guards; a test proves UPDATE/DELETE/CREATE fail and that a missing DB file is not created.
+- **Unknown ticket ID → typed `found=false`, not a tool error** — not-found is a normal outcome the API maps to 404; `is_error` is kept for bad input and real failures (422/503). Resources have no typed channel, so an unknown ID there raises.
+- **Input bounds in the tool signature (query 1–500 chars, `top_k`/`limit` 1–10, ID patterns, enum categories)** — the SDK rejects bad input before our code runs, and the bounds appear in the tool schema.
+- **`search_knowledge` does not expose the threshold** — a caller cannot lower the evidence bar; it is reported in the result instead.
+- **`NullPool` + one connection per tool call** — no connection is shared across threads if the SDK runs sync tools in a worker; cost is negligible for SQLite.
