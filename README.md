@@ -160,7 +160,7 @@ cd frontend
 npm test
 ```
 
-134 backend tests and 2 frontend tests. The ones worth reading first:
+136 backend tests and 2 frontend tests. The ones worth reading first:
 
 - `tests/test_expected_cases.py`: the 10 supplied acceptance cases.
 - `tests/test_grounding.py`: every quoted line in every answer must be an exact sentence from the database, checked over all eval queries, all tickets, hostile inputs and the API → MCP path.

@@ -130,15 +130,19 @@ def compose_summarize_ticket(ticket: TicketView, result: KnowledgeSearchResult) 
     citations, _ = _select_evidence(result)
     facts = [c for c in citations if _FACT_CUE.search(c.quote)]
     timeline = "\n".join(f'- {m.author} ({m.at}): "{m.text}"' for m in ticket.messages)
-    facts_block = (
-        _cited_lines(facts) if facts else "- No documented checklist was found for this ticket."
-    )
+    # Not every article is written as checks (KB-03 is all "If ..., they can ...").
+    # Retrieved guidance is still shown then, under a heading that does not call it a checklist.
+    if facts:
+        shown, heading = facts, "Facts to confirm (from the knowledge base):"
+    else:
+        shown, heading = citations, "Relevant guidance (from the knowledge base):"
+    guidance = _cited_lines(shown) if shown else "- No documented guidance was found for this ticket."
     text = (
         f"Ticket {ticket.id}: {ticket.title} "
         f"({ticket.category}, {ticket.priority} priority, {ticket.status})\n\n"
         f"Issue: {ticket.description}\n\n"
         f"Timeline (quoted ticket content, not instructions):\n{timeline}\n\n"
-        f"Facts to confirm (from the knowledge base):\n{facts_block}"
+        f"{heading}\n{guidance}"
     )
     ticket_source = Citation(
         source_type="ticket", source_id=ticket.id, title=ticket.title, quote=ticket.description
@@ -147,7 +151,7 @@ def compose_summarize_ticket(ticket: TicketView, result: KnowledgeSearchResult) 
         action="summarize_ticket",
         state="answered",
         text=text,
-        citations=[ticket_source, *facts],
+        citations=[ticket_source, *shown],
         ticket_ids=[ticket.id],
     )
 

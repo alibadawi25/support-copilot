@@ -20,7 +20,7 @@ Claude Code (Anthropic's coding assistant) was used throughout development: plan
 
 ## What was tested
 
-- 134 backend tests and 2 frontend tests, run after every phase.
+- 136 backend tests and 2 frontend tests, run after every phase.
 - The 10 supplied expected cases (`tests/test_expected_cases.py`).
 - A grounding checker that compares every quoted line in every answer with the database rather than with the answer's own citations, plus tamper tests proving the checker fails when a claim is added, a sentence is shortened or a citation is invented.
 - All five actions and the empty, insufficient-evidence, validation and reviewed states live in the browser.

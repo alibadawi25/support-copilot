@@ -97,3 +97,23 @@ def test_instruction_like_article_text_is_only_quoted():
 def test_similar_tickets_with_no_match_is_insufficient_evidence():
     answer = compose.compose_similar_tickets([])
     assert answer.state == "insufficient_evidence" and answer.reason
+
+
+def test_summary_falls_back_to_guidance_when_no_sentence_is_a_check(conn, index):
+    # KB-03 is phrased "If a customer still has a backup code, they can ..." and has
+    # no check/confirm wording. The retrieved guidance must still be shown and cited.
+    ticket = get_ticket(conn, "T-104")
+    result = index.search(compose.ticket_query(ticket), category=ticket.category)
+    answer = compose.compose_summarize_ticket(ticket, result)
+    assert "Relevant guidance (from the knowledge base):" in answer.text
+    assert "saved backup code" in answer.text
+    assert "No documented checklist" not in answer.text
+    assert [c.source_id for c in answer.citations] == ["T-104", "KB-03"]
+
+
+def test_summary_says_so_when_nothing_was_retrieved(conn, index):
+    ticket = get_ticket(conn, "T-112")  # category integrations: no article
+    result = index.search(compose.ticket_query(ticket), category=ticket.category)
+    answer = compose.compose_summarize_ticket(ticket, result)
+    assert "- No documented guidance was found for this ticket." in answer.text
+    assert [c.source_id for c in answer.citations] == ["T-112"]
