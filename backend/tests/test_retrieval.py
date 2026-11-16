@@ -72,3 +72,13 @@ def test_get_ticket_keeps_message_order_and_handles_unknown_id(conn):
     ticket = get_ticket(conn, "T-112")
     assert [m.author for m in ticket.messages] == ["customer", "customer"]
     assert get_ticket(conn, "T-999") is None
+
+
+def test_unseen_query_words_lower_the_score(index):
+    """One known word among unknown ones must not look like a full match."""
+    known_only = index.search("plan change", threshold=0.0).top_score
+    mostly_unseen = index.search("How do I change the dashboard language to French?")
+    assert mostly_unseen.hits == [] and 0 < mostly_unseen.top_score < known_only
+    assert index._coverage("pending authorization") == 1.0  # every word known: score untouched
+    assert index._coverage("zzz qqq") == 0.0
+

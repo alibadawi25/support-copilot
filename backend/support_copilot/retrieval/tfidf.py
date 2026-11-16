@@ -4,6 +4,8 @@ Built once in memory from the `article_chunks` table. A query is projected into
 the same vector space and compared by cosine similarity.
 """
 
+import math
+from collections import Counter
 from dataclasses import dataclass
 
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
@@ -12,8 +14,8 @@ from sqlalchemy import Connection, text
 from support_copilot.retrieval.chunking import split_sentences
 from support_copilot.schemas import KnowledgeHit, KnowledgeSearchResult, ScoredSentence
 
-# Middle of the gap measured by `python -m support_copilot.eval`: the best wrong
-# match scores 0.150, the weakest right one 0.182.
+# Measured by `python -m support_copilot.eval`: the best wrong match scores 0.150.
+# The weakest right ones are a paraphrase at 0.166 (refused) and T-104 at 0.197.
 DEFAULT_THRESHOLD = 0.17
 DEFAULT_TOP_K = 3
 
@@ -49,6 +51,7 @@ class KnowledgeIndex:
             stop_words=list(STOP_WORDS), ngram_range=(1, 2), sublinear_tf=True
         )
         self.matrix = self.vectorizer.fit_transform(c.index_text for c in chunks)
+        self._analyze = self.vectorizer.build_analyzer()
 
     def search(
         self,
@@ -57,7 +60,7 @@ class KnowledgeIndex:
         top_k: int = DEFAULT_TOP_K,
         threshold: float = DEFAULT_THRESHOLD,
     ) -> KnowledgeSearchResult:
-        query_vec = self.vectorizer.transform([query])
+        query_vec = self.vectorizer.transform([query]) * self._coverage(query)
         scores = (self.matrix @ query_vec.T).toarray().ravel()
 
         # Category filter first: an off-category chunk must never be returned,
@@ -87,6 +90,27 @@ class KnowledgeIndex:
             threshold=threshold,
             top_score=round(candidates[0][0], 4) if candidates else None,
         )
+
+    def _coverage(self, query: str) -> float:
+        """Share of the query's weight that the index knows, between 0 and 1.
+
+        sklearn drops query words it has never seen, so "change the dashboard
+        language to French" is scored as if the query were just "change" and
+        matches KB-06 strongly. Here unseen words stay in the query's length.
+
+        Each unseen word gets the smallest weight any indexed word has. That is
+        deliberately mild: ticket text is full of ordinary words these few
+        articles never use, and the heaviest weight (a word found in no chunk)
+        pushed T-104's own draft below the threshold.
+        """
+        terms = Counter(self._analyze(query))
+        vocabulary, idf = self.vectorizer.vocabulary_, self.vectorizer.idf_
+        known_sq = sum(
+            ((1 + math.log(tf)) * idf[vocabulary[t]]) ** 2 for t, tf in terms.items() if t in vocabulary
+        )
+        unseen_words = sum(1 for t in terms if t not in vocabulary and " " not in t)  # bigrams not counted twice
+        total_sq = known_sq + unseen_words * float(idf.min()) ** 2
+        return math.sqrt(known_sq / total_sq) if total_sq else 0.0
 
     def _score_sentences(self, query_vec, chunk_text: str) -> list[ScoredSentence]:
         """Score each whole sentence against the query so the composer can pick what to quote."""

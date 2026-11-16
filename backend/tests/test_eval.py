@@ -47,12 +47,10 @@ def test_outcomes_at_the_shipped_threshold(index):
 
     assert not errors & expected_ids  # the supplied cases are all right
     assert row[WRONG_SOURCE] == []  # never answers from an off-topic article
-    # Known limit: one matching word ("change") in a short query scores 0.20,
-    # because cosine ignores query words the index has never seen.
-    assert row[FALSE_ACCEPT] == ["language_setting"]
+    assert row[FALSE_ACCEPT] == []  # never answers a question the knowledge base cannot
     # Sparse retrieval misses paraphrases and two-word queries; it refuses rather than guesses.
     assert row[FALSE_REJECT] == [
-        "mfa_short_unscoped", "mfa_short_scoped", "mfa_paraphrase", "charged_twice", "bill_changed",
+        "mfa_short_unscoped", "mfa_short_scoped", "mfa_paraphrase", "charged_twice", "bill_changed", "big_download",
     ]
 
 
