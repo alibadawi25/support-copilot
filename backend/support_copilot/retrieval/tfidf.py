@@ -12,7 +12,9 @@ from sqlalchemy import Connection, text
 from support_copilot.retrieval.chunking import split_sentences
 from support_copilot.schemas import KnowledgeHit, KnowledgeSearchResult, ScoredSentence
 
-DEFAULT_THRESHOLD = 0.15
+# Middle of the gap measured by `python -m support_copilot.eval`: the best wrong
+# match scores 0.150, the weakest right one 0.182.
+DEFAULT_THRESHOLD = 0.17
 DEFAULT_TOP_K = 3
 
 # sklearn's English list drops negations. We keep them so "do not ask" and
