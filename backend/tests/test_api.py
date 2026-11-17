@@ -114,12 +114,22 @@ def test_count_tickets_with_filters(client):
     assert data["retrieval"] is None
 
 
-def test_draft_reply_still_uses_the_ticket_when_the_agent_types_an_instruction(client):
-    # On its own this text shares no word with any article and scored 0.
-    data = run(client, action="draft_reply", ticket_id="T-104", query="Draft a reply explaining next steps").json()
-    assert data["answer"]["state"] == "answered"
-    assert {c["source_id"] for c in data["answer"]["citations"]} == {"KB-03"}
-    assert [c["tool"] for c in data["tool_trace"]] == ["get_ticket", "search_knowledge", "search_knowledge"]
+def test_draft_reply_searches_once_with_the_ticket_and_covers_both_branches(client):
+    data = run(client, action="draft_reply", ticket_id="T-104").json()
+    assert [c["tool"] for c in data["tool_trace"]] == ["get_ticket", "search_knowledge"]
+    assert [c["chunk_id"] for c in data["answer"]["citations"]] == ["KB-03#chunk-1", "KB-03#chunk-2"]
+
+
+def test_draft_reply_rejects_typed_text_it_would_not_use(client):
+    response = run(client, action="draft_reply", ticket_id="T-104", query="Draft a reply explaining next steps")
+    assert response.status_code == 422
+
+
+def test_similar_tickets_stay_in_the_ticket_category(client):
+    # Unscoped, T-110 (password reset email) ranks T-103 (checkout receipt) first.
+    data = run(client, action="similar_tickets", ticket_id="T-110").json()
+    assert data["answer"]["ticket_ids"] == ["T-111"]
+    assert data["tool_trace"][-1]["arguments"]["category"] == "notifications"
 
 
 def test_count_tickets_with_a_keyword(client):

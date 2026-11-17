@@ -180,12 +180,12 @@ function CitationCard({ ref, number, citation: c, active, barWidth, onOpenTicket
       </div>
       <div className="citation-title">{c.title}</div>
       <blockquote>{c.quote}</blockquote>
-      {/* Article quotes carry a per-sentence cosine score, which can sit below the passage threshold. */}
       {c.score !== null && (
         <div className="score-row">
           <span className="muted small">
-            {c.source_type === "article" ? "best sentence score" : "bm25 score"} {score(c.score)}
+            {c.source_type === "article" ? "passage score" : "bm25 score"} {score(c.score)}
           </span>
+          {c.context && <span className="tag">same article, added for context</span>}
           {barWidth !== null && (
             <span className="score-bar" aria-hidden="true">
               <span style={{ width: `${barWidth * 100}%` }} />

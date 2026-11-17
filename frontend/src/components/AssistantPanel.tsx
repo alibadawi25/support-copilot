@@ -23,15 +23,16 @@ import { Select } from "./Select";
 const ACTION_INFO: Record<Action, { label: string; hint: string; icon: IconName }> = {
   search_knowledge: { label: "Search KB", icon: "book", hint: "Answer a question with quoted knowledge-base sentences." },
   summarize_ticket: { label: "Summarize", icon: "list", hint: "Condense the selected ticket and list the key facts still needed." },
-  similar_tickets: { label: "Similar", icon: "layers", hint: "Find resolved tickets like this one and how they were fixed." },
-  draft_reply: { label: "Draft reply", icon: "pen", hint: "Write an editable reply from documented guidance. Never sent." },
+  similar_tickets: { label: "Similar", icon: "layers", hint: "Find resolved tickets like this one, in the same category, and how they were fixed." },
+  draft_reply: { label: "Draft reply", icon: "pen", hint: "Write an editable reply from the ticket and documented guidance. Never sent." },
   count_tickets: { label: "Count", icon: "hash", hint: "Count tickets that match the filters and mention the given words." },
 };
 
 // Which inputs each action shows. The server decides what is *required* (422).
 const USES_TICKET: Action[] = ["summarize_ticket", "draft_reply", "similar_tickets"];
 const NEEDS_TICKET: Action[] = ["summarize_ticket", "draft_reply"];
-const USES_QUERY: Action[] = ["search_knowledge", "similar_tickets", "draft_reply"];
+// Draft reply takes no typed text: it is written from the ticket, then edited.
+const USES_QUERY: Action[] = ["search_knowledge", "similar_tickets"];
 const USES_CATEGORY: Action[] = ["search_knowledge", "similar_tickets"];
 
 type Run =
@@ -166,15 +167,19 @@ export function AssistantPanel({ ticketId, onSelectTicket }: Props) {
               <Select label="Priority" value={filters.priority ?? ""} options={PRIORITIES} onChange={setFilter("priority")} />
               <Select label="Category" value={filters.category ?? ""} options={CATEGORIES} onChange={setFilter("category")} />
               <div className="field field-wide">
-                <label htmlFor={keywordId}>Mentions (optional — every word must appear)</label>
+                <label htmlFor={keywordId}>Mentions</label>
                 <input
                   id={keywordId}
                   type="text"
+                  aria-describedby={`${keywordId}-hint`}
                   value={filters.keyword ?? ""}
                   maxLength={MAX_KEYWORD_CHARS}
                   placeholder="e.g. checkout"
                   onChange={(e) => setFilter("keyword")(e.target.value)}
                 />
+                <span id={`${keywordId}-hint`} className="char-count">
+                  Optional. Every word must appear in the ticket.
+                </span>
               </div>
             </div>
           )}

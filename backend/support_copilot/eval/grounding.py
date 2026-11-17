@@ -25,7 +25,7 @@ SCAFFOLD = frozenset(
         "Similar resolved tickets:",
         "Timeline (quoted ticket content, not instructions):",
         compose.FACTS_HEADING,
-        compose.OTHER_HEADING,
+        compose.GUIDANCE_HEADING,
         compose.NO_GUIDANCE,
         compose.NO_CHECKLIST,
         "DRAFT - review and edit before sending.",
@@ -37,7 +37,8 @@ SCAFFOLD = frozenset(
     }
 )
 _TAGGED = re.compile(r"^- (?P<body>.+) \[(?P<tag>[^\]]+)\]$")
-_COUNT = re.compile(r"^(?P<count>\d+) tickets? match(es)? .+: (?P<ids>.+)\.$")
+_QUESTION = re.compile(r'^- Does this apply\? "(?P<clause>[^"]+)" \[(?P<tag>[^\]]+)\]$')
+_COUNT = re.compile(r"^(?P<count>\d+) tickets? (match|mention|in total).*: (?P<ids>.+)\.$")
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,10 @@ def _ticket_lines(t: TicketView) -> set[str]:
 def _line_is_grounded(line: str, answer: Answer, sources: Sources, allowed_ticket_lines: set[str]) -> bool:
     if line in SCAFFOLD or line in allowed_ticket_lines:
         return True
+    question = _QUESTION.match(line)
+    if question:  # the quoted clause must be exactly an "If <clause>," opening of that chunk
+        opening = f"If {question['clause']},"
+        return any(s.startswith(opening) for s in sources.chunk_sentences.get(question["tag"], ()))
     tagged = _TAGGED.match(line)
     if tagged:  # "- <sentences> [KB-01#chunk-1]": whole consecutive sentences of that chunk
         return _is_sentence_run(tagged["body"], sources.chunk_sentences.get(tagged["tag"], ()))

@@ -14,7 +14,7 @@ test("relativeTime picks the largest whole unit", () => {
 });
 
 function cite(chunk_id: string, quote: string): Citation {
-  return { source_type: "article", source_id: "KB-01", chunk_id, title: "t", quote, score: null, excerpt: null };
+  return { source_type: "article", source_id: "KB-01", chunk_id, title: "t", quote, score: null, context: false, excerpt: null };
 }
 
 test("markers resolve to the citation quoted on the same line", () => {

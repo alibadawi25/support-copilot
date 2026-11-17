@@ -56,12 +56,12 @@ In the UI: pick a ticket in the queue, choose an action in the assistant panel, 
 | Try | Expect |
 |---|---|
 | T-101 → Draft reply | A draft marked "not sent", quoting KB-01 and KB-02. It says not to ask for another payment while one is pending. |
-| T-104 → Draft reply, extra detail `Draft a reply explaining next steps` | A draft quoting KB-03. The ticket text is always searched; typed text can only raise the score. |
-| T-104 → Summarize ticket | "Key facts we still need" lists both KB-03 branches: with and without a backup code. |
+| T-104 → Draft reply | A draft quoting both KB-03 branches (with and without a backup code), from one search on the ticket text. |
+| T-104 → Summarize ticket | "Key facts we still need" asks `Does this apply? "a customer still has a saved backup code"` and the same for "no backup code is available"; the whole sentences are quoted below. |
 | Search knowledge: `lost authenticator after replacing phone; backup code and enroll a new device`, category `account_access` | Answer cited to KB-03 |
 | Search knowledge: `Does the product reimburse a bank decline fee?`, category `billing` | Insufficient evidence. KB-06 matches, but only in a sentence saying it does not cover the topic. |
 | Search knowledge: `Configure scheduled SFTP delivery of reports to an external server`, category `integrations` | Insufficient evidence. No article covers it. |
-| T-101 → Find similar resolved tickets | T-103, with its resolution |
+| T-101 → Find similar resolved tickets | T-103, with its resolution (same category; see limitations) |
 | Count tickets, status `open` | 7 tickets, listed by ID |
 | Count tickets, status `open`, priority `high`, mentions `checkout` | 1 ticket: T-101 |
 | T-112 → Summarize ticket | The ticket's injected instruction appears only as quoted text |
@@ -89,9 +89,9 @@ Every response carries `run_id`, `answer` (state, text, citations), `retrieval` 
 - **Chunking** (`retrieval/chunking.py`): two whole sentences per chunk, no overlap. 7 articles give 15 chunks. Sentences are never cut, so a condition stays with its claim. Chunk IDs are stable: `KB-03#chunk-1`.
 - **Index build**: chunks are stored in SQLite by the seed. The TF-IDF matrix is not stored. The MCP server builds it in memory from `article_chunks` each time it starts, which takes milliseconds at this size. To rebuild after changing the data: re-run the seed, then restart the API.
 - **Vectoriser** (`retrieval/tfidf.py`): scikit-learn TF-IDF, unigrams and bigrams, sublinear TF, English stop words with negations kept. Title and tags are added to the indexed text; only the chunk's own sentences are ever quoted.
-- **Scoring**: cosine similarity, optional category filter, top 3. Query words the index has never seen count against the score, so one matching word in an off-topic question does not pass. Once one chunk of an article clears the threshold, that article's other chunks are kept at a floor of 0.05, so a two-chunk procedure is not cut in half.
+- **Scoring**: cosine similarity, optional category filter, top 3. Query words the index has never seen count against the score, so one matching word in an off-topic question does not pass. Once one chunk of an article clears the threshold, that article's other chunks are kept at a floor of 0.05, so a two-chunk procedure is not cut in half. Each citation shows its passage score; a passage under the threshold is labelled "same article, added for context".
 - **Threshold**: 0.17, chosen from the sweep below. Callers cannot lower it.
-- **Similar tickets**: SQLite FTS5 over resolved tickets, ranked by BM25, with a floor of 2.0. Terms are OR-joined.
+- **Similar tickets**: SQLite FTS5 over resolved tickets, ranked by BM25, with a floor of 2.0. Terms are OR-joined. With a ticket selected, results stay in its category unless the agent picks another.
 - **Count keyword**: the same FTS5 table over all tickets, terms AND-joined: every word must appear (stemmed).
 
 ### Evaluation
@@ -164,7 +164,7 @@ cd frontend
 npm test
 ```
 
-154 backend tests and 9 frontend tests. The ones worth reading first:
+159 backend tests and 9 frontend tests. The ones worth reading first:
 
 - `tests/test_expected_cases.py`: the 10 supplied acceptance cases.
 - `tests/test_grounding.py`: every quoted line in every answer must be an exact sentence from the database, checked over all eval queries, all tickets, hostile inputs and the API → MCP path.
@@ -191,6 +191,7 @@ AI_USAGE.md    AI tools used and what was reviewed
 
 - **Lexical retrieval.** TF-IDF matches words, not meaning. "multi-factor authentication" does not match "MFA", and "charged twice" does not match "duplicate payment". The eight false rejects above are this, and so are the two false accepts in the other direction: a shared topic word passes even when the article does not cover the asked-for thing. Embeddings would close most of that gap; there is no synonym map.
 - **The threshold is tuned on 7 articles.** 0.17 and the BM25 floor of 2.0 are measured on this data pack and would need re-measuring on any other corpus.
+- **Similar tickets is keyword overlap.** On ticket text, loose matches score 4.2–5.8 and one true match 4.39 (T-110 → T-111), so no BM25 floor separates them. Scoping to the ticket's category removes two of the three; T-101 → T-103 remains (same category, shares the payment-status check).
 - **Answers are quotes, not prose.** The composer selects and orders whole sentences. It cannot merge, rephrase or answer a question whose answer spans sentences that do not score well individually. T-103 (missing receipt email) gets no draft because no article covers it.
 - **Disclaimer detection is a pattern.** Sentences like "does not define…" are recognised by a fixed list of phrasings. A disclaimer written another way would be quoted as evidence.
 - **No MCP restart.** If the MCP child process dies, the assistant stays unavailable until the API is restarted.

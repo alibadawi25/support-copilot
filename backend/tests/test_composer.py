@@ -106,33 +106,57 @@ def test_summary_lists_both_branches_as_facts_still_needed(conn, index):
     ticket = get_ticket(conn, "T-104")
     result = index.search(compose.ticket_query(ticket), category=ticket.category)
     answer = compose.compose_summarize_ticket(ticket, result)
-    facts = answer.text.split(compose.FACTS_HEADING)[1]
-    assert "If a customer still has a saved backup code" in facts
-    assert "If no backup code is available" in facts
+    facts = answer.text.split(compose.FACTS_HEADING)[1].split(compose.GUIDANCE_HEADING)[0]
+    assert facts.strip().splitlines() == [
+        '- Does this apply? "a customer still has a saved backup code" [KB-03#chunk-1]',
+        '- Does this apply? "no backup code is available" [KB-03#chunk-2]',
+    ]
+    # The whole sentences are still quoted and cited below the questions.
+    assert "If no backup code is available, use the verified account recovery process" in answer.text
     assert [c.chunk_id for c in answer.citations[1:]] == ["KB-03#chunk-1", "KB-03#chunk-2"]
 
 
-def test_summary_lists_checks_to_make(conn, index):
+def test_summary_lists_checks_whole_and_conditions_as_questions(conn, index):
     ticket = get_ticket(conn, "T-101")
     result = index.search(compose.ticket_query(ticket), category=ticket.category)
-    facts = compose.compose_summarize_ticket(ticket, result).text.split(compose.FACTS_HEADING)[1]
-    assert "check the order and payment status using the transaction reference" in facts
-    assert RETRY in facts  # the other branch of KB-01
+    text = compose.compose_summarize_ticket(ticket, result).text
+    facts = text.split(compose.FACTS_HEADING)[1].split(compose.GUIDANCE_HEADING)[0]
+    assert "first check the order and payment status using the transaction reference." in facts
+    assert '- Does this apply? "the payment is pending" [KB-01#chunk-1]' in facts
+    assert '- Does this apply? "no transaction exists after the gateway check" [KB-01#chunk-2]' in facts
 
 
-def test_one_citation_per_chunk_quoting_consecutive_sentences():
+def test_draft_includes_every_branch_the_ticket_leaves_open(conn, index):
+    ticket = get_ticket(conn, "T-104")
+    result = index.search(compose.ticket_query(ticket), category=ticket.category)
+    text = compose.compose_draft_reply(ticket, result).text
+    assert "If a customer still has a saved backup code" in text
+    assert "If no backup code is available" in text
+
+
+def test_one_citation_per_chunk_with_the_passage_score():
     first, second = "If a code exists, use it once.", "Then enroll the new device."
     answer = compose.compose_search_knowledge(_result((first, 0.4), (second, 0.3)))
     assert len(answer.citations) == 1
     assert answer.citations[0].quote == f"{first} {second}"
-    assert answer.citations[0].score == 0.4
+    assert answer.citations[0].score == 0.5  # the passage's score, not the sentence's
+    assert answer.citations[0].context is False
 
 
-def test_count_text_is_singular_or_plural_and_names_the_keyword():
-    one = compose.compose_count_tickets(TicketFilter(keyword="checkout"), TicketCount(count=1, ticket_ids=["T-101"]))
-    none = compose.compose_count_tickets(TicketFilter(), TicketCount(count=0, ticket_ids=[]))
-    assert one.text == '1 ticket matches mentioning "checkout": T-101.'
-    assert none.text == "0 tickets match no filters: none."
+def test_chunk_below_the_threshold_is_marked_as_context(index):
+    answer = compose.compose_search_knowledge(index.search("account recovery after enabling multi-factor authentication"))
+    flags = {c.chunk_id: c.context for c in answer.citations}
+    assert flags == {"KB-03#chunk-1": True, "KB-03#chunk-2": False}
+
+
+def test_count_text_reads_naturally():
+    def text(count, **f):
+        ids = [f"T-{100 + i}" for i in range(1, count + 1)]
+        return compose.compose_count_tickets(TicketFilter(**f), TicketCount(count=count, ticket_ids=ids)).text
+
+    assert text(1, status="open", keyword="checkout") == '1 ticket matches status=open and mentions "checkout": T-101.'
+    assert text(3, keyword="checkout") == '3 tickets mention "checkout": T-101, T-102, T-103.'
+    assert text(0) == "0 tickets in total: none."
 
 
 def test_summary_says_so_when_nothing_was_retrieved(conn, index):

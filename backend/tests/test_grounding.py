@@ -83,6 +83,14 @@ def test_checker_flags_an_added_claim(good_answer, sources):
     assert any("ungrounded line" in p for p in grounding_violations(tampered, sources))
 
 
+def test_checker_flags_a_question_whose_clause_is_not_the_articles(good_answer, sources):
+    real = '- Does this apply? "the payment is pending" [KB-01#chunk-1]'
+    fake = '- Does this apply? "the payment is refunded" [KB-01#chunk-1]'
+    assert grounding_violations(good_answer.model_copy(update={"text": good_answer.text + "\n" + real}), sources) == []
+    tampered = good_answer.model_copy(update={"text": good_answer.text + "\n" + fake})
+    assert any("ungrounded line" in p for p in grounding_violations(tampered, sources))
+
+
 def test_checker_flags_a_shortened_sentence(good_answer, sources):
     # Dropping the condition is exactly how "the customer may retry once" becomes a false claim.
     full = "If no transaction exists after the gateway check, the customer may retry once."

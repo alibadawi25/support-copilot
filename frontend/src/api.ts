@@ -61,7 +61,8 @@ export interface Citation {
   chunk_id: string | null;
   title: string;
   quote: string;
-  score: number | null;
+  score: number | null; // passage score (articles) or bm25 (tickets)
+  context: boolean; // passage below the threshold, kept because its article matched
   excerpt: string | null;
 }
 

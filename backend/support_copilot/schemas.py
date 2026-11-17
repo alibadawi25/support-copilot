@@ -117,7 +117,8 @@ class Citation(BaseModel):
     chunk_id: str | None = None  # KB-03#chunk-1 for articles
     title: str
     quote: str  # verbatim: whole consecutive sentences of one chunk, or a ticket field
-    score: float | None = None  # best sentence score in the quote (None for the ticket itself)
+    score: float | None = None  # passage score for articles, bm25 for tickets, None for the ticket itself
+    context: bool = False  # passage below the threshold, kept because another chunk of its article passed
     excerpt: str | None = None  # the whole chunk the quote came from, for context in the UI
 
 

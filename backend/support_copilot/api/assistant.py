@@ -63,24 +63,6 @@ async def _search_knowledge(req: AssistantRequest, flow: _Flow) -> Result:
     return compose.compose_search_knowledge(result), info
 
 
-async def _ticket_knowledge(
-    flow: _Flow, ticket: TicketView, agent_text: str | None
-) -> tuple[KnowledgeSearchResult, RetrievalInfo]:
-    """Knowledge for a ticket. The agent's text can sharpen the search, never weaken it.
-
-    The ticket's own text is always searched. If the agent typed something, the
-    ticket text plus that is searched too and kept only if it scores higher: an
-    instruction like "Draft a reply explaining next steps" adds words no article
-    uses, which would otherwise pull a good match under the threshold.
-    """
-    best = await flow.knowledge(_ticket_query(ticket), ticket.category)
-    if agent_text:
-        combined = await flow.knowledge(_ticket_query(ticket, agent_text), ticket.category)
-        if (combined[0].top_score or 0) > (best[0].top_score or 0):
-            best = combined
-    return best
-
-
 async def _summarize_ticket(req: AssistantRequest, flow: _Flow) -> Result:
     ticket = await flow.ticket(req.ticket_id)
     result, info = await flow.knowledge(_ticket_query(ticket), ticket.category)
@@ -89,18 +71,25 @@ async def _summarize_ticket(req: AssistantRequest, flow: _Flow) -> Result:
 
 async def _draft_reply(req: AssistantRequest, flow: _Flow) -> Result:
     ticket = await flow.ticket(req.ticket_id)
-    result, info = await _ticket_knowledge(flow, ticket, req.query)
+    # The draft is grounded in the ticket alone; the agent edits the wording afterwards.
+    # (A typed instruction such as "Draft a reply explaining next steps" shares no
+    # word with any article and only dragged the score down.)
+    result, info = await flow.knowledge(_ticket_query(ticket), ticket.category)
     return compose.compose_draft_reply(ticket, result), info
 
 
 async def _similar_tickets(req: AssistantRequest, flow: _Flow) -> Result:
-    query = req.query
+    query, category = req.query, req.category
     if req.ticket_id:
         ticket = await flow.ticket(req.ticket_id)
         query = _ticket_query(ticket, req.query)
+        # Same category as the ticket unless the agent picked one. BM25 on ticket text
+        # scores loose cross-category matches (T-110 password email -> T-103 receipt,
+        # 4.77) above a true one (T-110 -> T-111 spam, 4.39), so no floor separates them.
+        category = category or ticket.category
     data = await flow.call(
         "search_resolved_tickets",
-        {"query": query, "exclude_ticket_id": req.ticket_id, "category": req.category, "limit": TOP_K},
+        {"query": query, "exclude_ticket_id": req.ticket_id, "category": category, "limit": TOP_K},
     )
     result = SimilarTicketsResult.model_validate(data)
     return compose.compose_similar_tickets(result.tickets), RetrievalInfo(method=result.method, top_k=TOP_K)

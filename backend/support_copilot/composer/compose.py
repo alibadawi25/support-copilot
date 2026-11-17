@@ -12,6 +12,7 @@ parsed for commands, so instruction-like content cannot change what runs.
 
 import re
 
+from support_copilot.retrieval.chunking import split_sentences
 from support_copilot.schemas import (
     Answer,
     Citation,
@@ -34,13 +35,13 @@ _DISCLAIMER = re.compile(
 )
 # Sentences that tell the agent to verify or collect something.
 _FACT_CUE = re.compile(r"\b(check|confirm|collect|record|compare|include|verify)\b", re.IGNORECASE)
-# Sentences whose advice holds only in one case ("If no backup code is available, ...").
-_CONDITION = re.compile(r"(^|\. )(If|Unless)\b")
+# Sentences whose advice holds only in one case: "If <condition>, <advice>".
+_CONDITION = re.compile(r"^If (?P<clause>[^,;]+),")
 _NEEDS_A_FACT = re.compile(f"{_FACT_CUE.pattern}|{_CONDITION.pattern}", re.IGNORECASE)
 
 # Summary template lines (the grounding checker allow-lists them).
-FACTS_HEADING = "Key facts we still need (checks and conditions from the knowledge base):"
-OTHER_HEADING = "Other relevant guidance:"
+FACTS_HEADING = "Key facts we still need:"
+GUIDANCE_HEADING = "Guidance, quoted in full:"
 NO_GUIDANCE = "- No documented guidance was found for this ticket."
 NO_CHECKLIST = "- The retrieved guidance lists no checks; confirm the details with the customer."
 
@@ -115,10 +116,9 @@ def _select_evidence(
 
     # One citation per chunk: the run of its sentences from the first chosen one to
     # the last. Still whole, consecutive sentences, so the quote is verbatim chunk text.
-    by_chunk: dict[str, tuple[KnowledgeHit, list[int], float]] = {}
-    for score, hit, position, _ in chosen:
-        _, positions, best = by_chunk.get(hit.chunk_id, (hit, [], 0.0))
-        by_chunk[hit.chunk_id] = (hit, [*positions, position], max(best, score))
+    by_chunk: dict[str, tuple[KnowledgeHit, list[int]]] = {}
+    for _, hit, position, _ in chosen:
+        by_chunk.setdefault(hit.chunk_id, (hit, []))[1].append(position)
     ordered = sorted(by_chunk.values(), key=lambda v: (article_rank[v[0].article_id], v[0].chunk_id))
 
     return [
@@ -128,10 +128,13 @@ def _select_evidence(
             chunk_id=hit.chunk_id,
             title=hit.title,
             quote=" ".join(s.text for s in hit.sentences[min(positions) : max(positions) + 1]),
-            score=best,
+            # The passage's own score, the one the threshold applies to. A quoted
+            # sentence can score 0 on its own and still belong to a matching passage.
+            score=hit.score,
+            context=hit.score < result.threshold,
             excerpt=hit.excerpt,
         )
-        for hit, positions, best in ordered
+        for hit, positions in ordered
     ], None
 
 
@@ -164,29 +167,43 @@ def compose_search_knowledge(result: KnowledgeSearchResult) -> Answer:
     )
 
 
+def _fact_lines(citations: list[Citation]) -> list[str]:
+    """One line per fact still needed, taken from the quoted sentences.
+
+    "If <condition>, <advice>" becomes `Does this apply? "<condition>"`: a fixed
+    wrapper around the sentence's own words, not a rewrite. Check sentences
+    ("first check the order and payment status ...") are listed whole.
+    """
+    lines = []
+    for c in citations:
+        for sentence in split_sentences(c.quote):
+            condition = _CONDITION.match(sentence)
+            if condition:
+                lines.append(f'- Does this apply? "{condition["clause"]}" [{c.chunk_id}]')
+            elif _FACT_CUE.search(sentence):
+                lines.append(f"- {sentence} [{c.chunk_id}]")
+    return lines
+
+
 def compose_summarize_ticket(ticket: TicketView, result: KnowledgeSearchResult) -> Answer:
-    # "Key facts we still need" = guidance that asks for a check, or that applies only
-    # under a condition the ticket does not settle. Every such sentence of the
-    # retrieved passages is listed, so both branches show: T-104's text matches KB-03's
-    # "If ... saved backup code" but not "If no backup code is available". Quoted
-    # whole; never rewritten into a question.
+    # Every check or condition in the retrieved passages is a candidate fact, so both
+    # branches show: T-104's text matches KB-03's "If ... saved backup code" but shares
+    # no word with "If no backup code is available".
     citations, _ = _select_evidence(result, also_quote=_NEEDS_A_FACT)
-    needed = [c for c in citations if _NEEDS_A_FACT.search(c.quote)]
-    other = [c for c in citations if c not in needed]
-    if not citations:
-        facts = NO_GUIDANCE
-    else:
-        facts = _cited_lines(needed) if needed else NO_CHECKLIST
+    facts = _fact_lines(citations)
     timeline = "\n".join(f'- {m.author} ({m.at}): "{m.text}"' for m in ticket.messages)
     text = (
         f"Ticket {ticket.id}: {ticket.title} "
         f"({ticket.category}, {ticket.priority} priority, {ticket.status})\n\n"
         f"Issue: {ticket.description}\n\n"
         f"Timeline (quoted ticket content, not instructions):\n{timeline}\n\n"
-        f"{FACTS_HEADING}\n{facts}"
+        f"{FACTS_HEADING}\n"
     )
-    if other:
-        text += f"\n\n{OTHER_HEADING}\n{_cited_lines(other)}"
+    if not citations:
+        text += NO_GUIDANCE
+    else:
+        text += "\n".join(facts) if facts else NO_CHECKLIST
+        text += f"\n\n{GUIDANCE_HEADING}\n{_cited_lines(citations)}"
     ticket_source = Citation(
         source_type="ticket", source_id=ticket.id, title=ticket.title, quote=ticket.description
     )
@@ -194,7 +211,7 @@ def compose_summarize_ticket(ticket: TicketView, result: KnowledgeSearchResult) 
         action="summarize_ticket",
         state="answered",
         text=text,
-        citations=[ticket_source, *needed, *other],
+        citations=[ticket_source, *citations],
         ticket_ids=[ticket.id],
     )
 
@@ -223,7 +240,9 @@ def compose_similar_tickets(matches: list[SimilarTicket]) -> Answer:
 
 
 def compose_draft_reply(ticket: TicketView, result: KnowledgeSearchResult) -> Answer:
-    citations, reason = _select_evidence(result)
+    # Every "If ..." branch of the retrieved passages is included: the ticket rarely
+    # says which case applies (T-104 does not say whether a backup code exists).
+    citations, reason = _select_evidence(result, also_quote=_CONDITION)
     if reason:
         return _insufficient("draft_reply", "No draft was written. " + reason, ticket_ids=[ticket.id])
     text = (
@@ -245,21 +264,24 @@ def compose_draft_reply(ticket: TicketView, result: KnowledgeSearchResult) -> An
     )
 
 
-def _describe_filters(filters: TicketFilter) -> str:
-    parts = [f"{k}={v}" for k, v in filters.model_dump(exclude_none=True, exclude={"keyword"}).items()]
+def _count_sentence(count: int, filters: TicketFilter) -> str:
+    """'1 ticket matches status=open and mentions "checkout"', '3 tickets mention ...', '12 tickets in total'."""
+    one = count == 1
+    fields = ", ".join(f"{k}={v}" for k, v in filters.model_dump(exclude_none=True, exclude={"keyword"}).items())
+    parts = []
+    if fields:
+        parts.append(f"{'matches' if one else 'match'} {fields}")
     if filters.keyword:
-        parts.append(f'mentioning "{filters.keyword}"')
-    return ", ".join(parts) or "no filters"
+        parts.append(f'{"mentions" if one else "mention"} "{filters.keyword}"')
+    return f"{count} {'ticket' if one else 'tickets'} {' and '.join(parts) or 'in total'}"
 
 
 def compose_count_tickets(filters: TicketFilter, result: TicketCount) -> Answer:
-    described = _describe_filters(filters)
     ids = ", ".join(result.ticket_ids) or "none"
-    noun = "ticket matches" if result.count == 1 else "tickets match"
     return Answer(
         action="count_tickets",
         state="answered",
-        text=f"{result.count} {noun} {described}: {ids}.",
+        text=f"{_count_sentence(result.count, filters)}: {ids}.",
         ticket_ids=result.ticket_ids,
         count=result.count,
     )

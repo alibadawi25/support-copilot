@@ -33,6 +33,8 @@ class AssistantRequest(BaseModel):
             raise ValueError("Type a question to search the knowledge base.")
         if self.action == "similar_tickets" and not (self.ticket_id or self.query):
             raise ValueError("Select a ticket or describe the problem to find similar tickets.")
+        if self.action == "draft_reply" and self.query:
+            raise ValueError("Draft reply is written from the ticket itself; edit the draft after it is written.")
         if self.action == "count_tickets" and self.query:
             # Counting is filter-only; a question here would be silently ignored.
             raise ValueError("Count uses the filters and keyword, not a question.")

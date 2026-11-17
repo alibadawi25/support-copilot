@@ -58,6 +58,7 @@ test("a draft is editable, labelled as not sent, and cites its sources", async (
             title: "Payment failures",
             quote: "If the payment is pending, do not ask the customer to submit another payment.",
             score: 0.412,
+            context: true,
             excerpt: null,
           },
         ],
@@ -70,7 +71,8 @@ test("a draft is editable, labelled as not sent, and cites its sources", async (
   await userEvent.type(editor, " Edited.");
   expect(editor).toHaveValue("DRAFT - review and edit before sending. Edited.");
   expect(screen.getAllByTestId("citation")).toHaveLength(1);
-  expect(screen.getByText("best sentence score 0.412")).toBeInTheDocument();
+  expect(screen.getByText("passage score 0.412")).toBeInTheDocument();
+  expect(screen.getByText("same article, added for context")).toBeInTheDocument();
 });
 
 test("a count shows no empty citations section and a singular tool call", () => {
