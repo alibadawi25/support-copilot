@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Icon } from "./Icon";
 
 /** Editable reply draft. There is deliberately no send action anywhere in the app. */
 export function DraftEditor({ initialText }: { initialText: string }) {
@@ -17,14 +18,18 @@ export function DraftEditor({ initialText }: { initialText: string }) {
   return (
     <div className="draft">
       <div className="draft-head">
-        <span className="badge draft-label">Draft — not sent</span>
-        <button type="button" onClick={copy}>
-          Copy
-        </button>
+        <span className="pill draft-label">
+          <Icon name="pen" size={12} />
+          Draft — not sent
+        </span>
         <span className="small muted" role="status">
           {copied === "yes" && "Copied"}
           {copied === "failed" && "Copy failed — select the text and copy manually"}
         </span>
+        <button type="button" className="btn btn-sm" onClick={copy}>
+          <Icon name="copy" size={14} />
+          Copy
+        </button>
       </div>
       <textarea
         aria-label="Reply draft"
@@ -35,6 +40,7 @@ export function DraftEditor({ initialText }: { initialText: string }) {
           setCopied(null);
         }}
       />
+      <p className="small muted">Edit freely. Copy it into your helpdesk to send — this app never sends anything.</p>
     </div>
   );
 }

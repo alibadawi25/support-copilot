@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type ApiError, type TicketDetail, setReviewed } from "../api";
 import { type Load, toApiError } from "../useLoad";
+import { EmptyState, PriorityPill, Skeleton, StatusPill, When } from "./Bits";
 import { ErrorNote } from "./ErrorNote";
+import { Icon } from "./Icon";
 
 interface Props {
   ticket: Load<TicketDetail> | null; // null = nothing selected
@@ -12,9 +14,25 @@ interface Props {
 export function TicketDetailView({ ticket, onChange, onRetry }: Props) {
   return (
     <section className="panel detail" aria-label="Ticket detail">
-      {ticket === null && <p className="muted">Select a ticket to see its details.</p>}
-      {ticket?.status === "loading" && <p className="muted">Loading ticket…</p>}
-      {ticket?.status === "error" && <ErrorNote error={ticket.error} onRetry={onRetry} />}
+      {ticket === null && (
+        <EmptyState icon="ticket" title="Select a ticket to see its details.">
+          <p className="small muted">Pick one from the queue, or use the arrow keys.</p>
+        </EmptyState>
+      )}
+      {ticket?.status === "loading" && (
+        <div className="panel-body">
+          <p className="sr-only" role="status">
+            Loading ticket…
+          </p>
+          <Skeleton lines={2} />
+          <Skeleton lines={6} />
+        </div>
+      )}
+      {ticket?.status === "error" && (
+        <div className="panel-body">
+          <ErrorNote error={ticket.error} onRetry={onRetry} />
+        </div>
+      )}
       {ticket?.status === "ready" && <Detail ticket={ticket.data} onChange={onChange} />}
     </section>
   );
@@ -38,61 +56,93 @@ function Detail({ ticket, onChange }: { ticket: TicketDetail; onChange: (t: Tick
 
   return (
     <>
-      <header className="detail-head">
-        <div>
-          <span className="mono">{ticket.id}</span>
+      <header className="panel-head detail-head">
+        <div className="detail-title">
+          <span className="row-tags">
+            <span className="id-chip mono">{ticket.id}</span>
+            <PriorityPill priority={ticket.priority} />
+            <StatusPill status={ticket.status} />
+          </span>
           <h2>{ticket.title}</h2>
         </div>
-        <button type="button" onClick={toggleReviewed} disabled={saving}>
-          {ticket.reviewed_at ? "Unmark reviewed" : "Mark reviewed"}
-        </button>
+        {ticket.reviewed_at ? (
+          <span className="reviewed-state">
+            <span className="pill pill-ok">
+              <Icon name="check" size={12} />
+              reviewed <When iso={ticket.reviewed_at} />
+            </span>
+            <button type="button" className="btn btn-sm btn-ghost" onClick={toggleReviewed} disabled={saving}>
+              Unmark reviewed
+            </button>
+          </span>
+        ) : (
+          <button type="button" className="btn" onClick={toggleReviewed} disabled={saving}>
+            <Icon name="check" />
+            Mark reviewed
+          </button>
+        )}
       </header>
-      {error && <ErrorNote error={error} />}
 
-      <dl className="meta">
-        <Meta label="Status" value={ticket.status} />
-        <Meta label="Priority" value={ticket.priority} />
-        <Meta label="Category" value={ticket.category.replace(/_/g, " ")} />
-        <Meta label="Product area" value={ticket.product_area} />
-        <Meta label="Created" value={ticket.created_at} />
-        <Meta label="Updated" value={ticket.updated_at} />
-        <Meta label="Reviewed" value={ticket.reviewed_at ?? "Not reviewed"} />
-      </dl>
+      <div className="panel-body">
+        {error && <ErrorNote error={error} />}
 
-      <h3>Description</h3>
-      <p className="prose">{ticket.description}</p>
+        <dl className="meta">
+          <Meta label="Category">{ticket.category.replace(/_/g, " ")}</Meta>
+          <Meta label="Product area">{ticket.product_area.replace(/_/g, " ")}</Meta>
+          <Meta label="Created">
+            <When iso={ticket.created_at} />
+          </Meta>
+          <Meta label="Updated">
+            <When iso={ticket.updated_at} />
+          </Meta>
+        </dl>
 
-      <h3>Timeline</h3>
-      {ticket.messages.length === 0 ? (
-        <p className="muted">No messages.</p>
-      ) : (
-        <ol className="timeline">
-          {ticket.messages.map((m, i) => (
-            <li key={i}>
-              <span className="small">
-                <strong>{m.author}</strong> <span className="muted">{m.at}</span>
-              </span>
-              <p className="prose">{m.text}</p>
-            </li>
-          ))}
-        </ol>
-      )}
+        <h3>Description</h3>
+        <p className="prose">{ticket.description}</p>
 
-      {ticket.resolution_summary && (
-        <>
-          <h3>Resolution</h3>
-          <p className="prose">{ticket.resolution_summary}</p>
-        </>
-      )}
+        <h3>Timeline</h3>
+        {ticket.messages.length === 0 ? (
+          <p className="muted">No messages.</p>
+        ) : (
+          <ol className="timeline">
+            {ticket.messages.map((m, i) => (
+              <li key={i} className={`msg msg-${m.author}`}>
+                <span className="avatar" aria-hidden="true">
+                  {m.author.charAt(0).toUpperCase()}
+                </span>
+                <div className="msg-body">
+                  <div className="msg-head">
+                    <strong>{m.author}</strong>
+                    <span className="muted small">
+                      <When iso={m.at} />
+                    </span>
+                  </div>
+                  <p className="prose">{m.text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {ticket.resolution_summary && (
+          <div className="callout callout-ok">
+            <Icon name="shield" />
+            <div>
+              <strong>Resolution</strong>
+              <p className="prose">{ticket.resolution_summary}</p>
+            </div>
+          </div>
+        )}
+      </div>
     </>
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function Meta({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <dt>{label}</dt>
-      <dd>{value}</dd>
+      <dd>{children}</dd>
     </div>
   );
 }

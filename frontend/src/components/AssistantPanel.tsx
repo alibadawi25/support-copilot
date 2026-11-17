@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   ACTIONS,
   type Action,
@@ -13,19 +13,22 @@ import {
 } from "../api";
 import { toApiError } from "../useLoad";
 import { AnswerView } from "./AnswerView";
+import { EmptyState, Skeleton } from "./Bits";
 import { ErrorNote } from "./ErrorNote";
+import { Icon, type IconName } from "./Icon";
 import { Select } from "./Select";
 
-const ACTION_LABELS: Record<Action, string> = {
-  search_knowledge: "Search knowledge base",
-  summarize_ticket: "Summarize ticket",
-  similar_tickets: "Find similar resolved tickets",
-  draft_reply: "Draft reply",
-  count_tickets: "Count tickets",
+const ACTION_INFO: Record<Action, { label: string; hint: string; icon: IconName }> = {
+  search_knowledge: { label: "Search KB", icon: "book", hint: "Answer a question with quoted knowledge-base sentences." },
+  summarize_ticket: { label: "Summarize", icon: "list", hint: "Condense the selected ticket and list what to confirm." },
+  similar_tickets: { label: "Similar", icon: "layers", hint: "Find resolved tickets like this one and how they were fixed." },
+  draft_reply: { label: "Draft reply", icon: "pen", hint: "Write an editable reply from documented guidance. Never sent." },
+  count_tickets: { label: "Count", icon: "hash", hint: "Count tickets that match the filters." },
 };
 
 // Which inputs each action shows. The server decides what is *required* (422).
 const USES_TICKET: Action[] = ["summarize_ticket", "draft_reply", "similar_tickets"];
+const NEEDS_TICKET: Action[] = ["summarize_ticket", "draft_reply"];
 const USES_QUERY: Action[] = ["search_knowledge", "similar_tickets", "draft_reply"];
 const USES_CATEGORY: Action[] = ["search_knowledge", "similar_tickets"];
 
@@ -77,57 +80,114 @@ export function AssistantPanel({ ticketId, onSelectTicket }: Props) {
     }
   }
 
+  function submitOnCtrlEnter(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      event.currentTarget.requestSubmit();
+    }
+  }
+
   const setFilter = (key: keyof TicketFilter) => (value: string) => setFilters({ ...filters, [key]: value });
+  const loading = run.status === "loading";
 
   return (
     <section className="panel assistant" aria-label="Assistant">
-      <h2>Assistant</h2>
-      <form onSubmit={submit} className="assistant-form">
-        <label className="field">
-          <span>Action</span>
-          <select value={action} onChange={(e) => setAction(e.target.value as Action)}>
+      <div className="panel-head">
+        <h2>Assistant</h2>
+        <span className="small muted">evidence-only</span>
+      </div>
+
+      <div className="panel-body">
+        <form onSubmit={submit} onKeyDown={submitOnCtrlEnter} className="assistant-form">
+          <fieldset className="actions">
+            <legend className="sr-only">Action</legend>
             {ACTIONS.map((a) => (
-              <option key={a} value={a}>
-                {ACTION_LABELS[a]}
-              </option>
+              <label key={a} className="action-option">
+                <input
+                  type="radio"
+                  name="action"
+                  value={a}
+                  checked={action === a}
+                  onChange={() => setAction(a)}
+                />
+                <Icon name={ACTION_INFO[a].icon} />
+                {ACTION_INFO[a].label}
+              </label>
             ))}
-          </select>
-        </label>
+          </fieldset>
+          <p className="small muted">{ACTION_INFO[action].hint}</p>
 
-        {USES_TICKET.includes(action) && (
-          <p className="small muted">
-            Ticket: <span className="mono">{ticketId ?? "none selected"}</span>
-          </p>
-        )}
+          {USES_TICKET.includes(action) &&
+            (ticketId ? (
+              <p className="context-chip">
+                <Icon name="ticket" size={14} />
+                Using <span className="mono">{ticketId}</span>
+              </p>
+            ) : (
+              <p className={`context-chip ${NEEDS_TICKET.includes(action) ? "is-missing" : ""}`}>
+                <Icon name="info" size={14} />
+                {NEEDS_TICKET.includes(action)
+                  ? "Select a ticket in the queue first."
+                  : "No ticket selected: describe the problem below."}
+              </p>
+            ))}
 
-        {USES_QUERY.includes(action) && (
-          <label className="field">
-            <span>{action === "search_knowledge" ? "Question" : "Question (optional — defaults to the ticket text)"}</span>
-            <textarea rows={3} value={query} onChange={(e) => setQuery(e.target.value)} />
-          </label>
-        )}
+          {USES_QUERY.includes(action) && (
+            <label className="field">
+              <span>
+                {action === "search_knowledge" ? "Question" : "Question (optional — defaults to the ticket text)"}
+              </span>
+              <textarea
+                rows={3}
+                value={query}
+                placeholder="e.g. Customer was charged twice for one order"
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          )}
 
-        {USES_CATEGORY.includes(action) && (
-          <Select label="Category" value={category} options={CATEGORIES} onChange={setCategory} />
-        )}
+          {USES_CATEGORY.includes(action) && (
+            <Select label="Category" value={category} options={CATEGORIES} onChange={setCategory} />
+          )}
 
-        {action === "count_tickets" && (
-          <div className="filters">
-            <Select label="Status" value={filters.status ?? ""} options={STATUSES} onChange={setFilter("status")} />
-            <Select label="Priority" value={filters.priority ?? ""} options={PRIORITIES} onChange={setFilter("priority")} />
-            <Select label="Category" value={filters.category ?? ""} options={CATEGORIES} onChange={setFilter("category")} />
+          {action === "count_tickets" && (
+            <div className="filters">
+              <Select label="Status" value={filters.status ?? ""} options={STATUSES} onChange={setFilter("status")} />
+              <Select label="Priority" value={filters.priority ?? ""} options={PRIORITIES} onChange={setFilter("priority")} />
+              <Select label="Category" value={filters.category ?? ""} options={CATEGORIES} onChange={setFilter("category")} />
+            </div>
+          )}
+
+          <div className="run-row">
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? <span className="spinner" aria-hidden="true" /> : <Icon name="play" size={14} />}
+              {loading ? "Running…" : "Run"}
+            </button>
+            <span className="small muted">
+              <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+            </span>
           </div>
+        </form>
+
+        {run.status === "idle" && (
+          <EmptyState icon="book" title="Pick an action and run it.">
+            <p className="small muted">Every answer quotes its sources, or says it has none.</p>
+          </EmptyState>
         )}
-
-        <button type="submit" className="primary" disabled={run.status === "loading"}>
-          {run.status === "loading" ? "Running…" : "Run"}
-        </button>
-      </form>
-
-      {run.status === "idle" && <p className="muted">Pick an action and run it. Answers quote their sources.</p>}
-      {run.status === "loading" && <p className="muted">Retrieving evidence…</p>}
-      {run.status === "error" && <ErrorNote error={run.error} />}
-      {run.status === "done" && <AnswerView response={run.response} onSelectTicket={onSelectTicket} />}
+        {run.status === "loading" && (
+          <>
+            <p className="muted small" role="status">
+              Retrieving evidence…
+            </p>
+            <Skeleton lines={5} />
+          </>
+        )}
+        {run.status === "error" && <ErrorNote error={run.error} />}
+        {run.status === "done" && (
+          // key: a new run starts with no citation highlighted and a fresh draft
+          <AnswerView key={run.response.run_id} response={run.response} onSelectTicket={onSelectTicket} />
+        )}
+      </div>
     </section>
   );
 }
