@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from mcp import StdioServerParameters
 from sqlalchemy import create_engine, select, text
@@ -68,6 +69,16 @@ def create_app(mcp_params: StdioServerParameters | None = None) -> FastAPI:
     @app.exception_handler(TicketNotFound)
     async def ticket_not_found(_: Request, exc: TicketNotFound):
         return JSONResponse(status_code=404, content={"detail": f"Ticket {exc} not found"})
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_: Request, exc: RequestValidationError):
+        # FastAPI's default 422 echoes the submitted value back (`input`), which
+        # can be a whole oversized query. Keep only where and what went wrong.
+        errors = [
+            {"loc": list(e["loc"]), "msg": e["msg"].removeprefix("Value error, "), "type": e["type"]}
+            for e in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     @app.exception_handler(McpError)
     async def mcp_unavailable(_: Request, exc: McpError):

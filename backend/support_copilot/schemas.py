@@ -1,8 +1,8 @@
 """Typed contracts shared by retrieval, the composer, the MCP server and the API."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 Status = Literal["open", "resolved"]
 Priority = Literal["low", "medium", "high"]
@@ -34,7 +34,8 @@ class KnowledgeHit(BaseModel):
 
 
 class KnowledgeSearchResult(BaseModel):
-    hits: list[KnowledgeHit]  # only chunks at or above the threshold, best first
+    # Chunks at or above the threshold, plus other chunks of an accepted article; best first.
+    hits: list[KnowledgeHit]
     threshold: float
     top_score: float | None  # best score seen after the category filter, even if rejected
     method: str = "tfidf_cosine"
@@ -53,14 +54,20 @@ class SimilarTicketsResult(BaseModel):
     method: str = "fts5_bm25"
 
 
+MAX_KEYWORD_CHARS = 100
+Keyword = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_KEYWORD_CHARS)]
+
+
 class TicketFilter(BaseModel):
-    """Allowed count filters. Values are enums, so no free text ever reaches SQL."""
+    """Allowed count filters. Field filters are enums bound as parameters; the keyword
+    reaches SQL only as an FTS5 MATCH expression of quoted words (`build_fts_query`)."""
 
     model_config = ConfigDict(extra="forbid")  # an unknown filter is an error, not ignored
 
     status: Status | None = None
     priority: Priority | None = None
     category: Category | None = None
+    keyword: Keyword | None = None  # every word must appear in the ticket text
 
 
 class TicketCount(BaseModel):
@@ -109,8 +116,8 @@ class Citation(BaseModel):
     source_id: str  # KB-03 or T-105
     chunk_id: str | None = None  # KB-03#chunk-1 for articles
     title: str
-    quote: str  # verbatim text taken from the source
-    score: float | None = None  # retrieval score of the quote (None for the ticket itself)
+    quote: str  # verbatim: whole consecutive sentences of one chunk, or a ticket field
+    score: float | None = None  # best sentence score in the quote (None for the ticket itself)
     excerpt: str | None = None  # the whole chunk the quote came from, for context in the UI
 
 

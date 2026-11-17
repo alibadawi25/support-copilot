@@ -70,5 +70,16 @@ test("a draft is editable, labelled as not sent, and cites its sources", async (
   await userEvent.type(editor, " Edited.");
   expect(editor).toHaveValue("DRAFT - review and edit before sending. Edited.");
   expect(screen.getAllByTestId("citation")).toHaveLength(1);
-  expect(screen.getByText("sentence score 0.412")).toBeInTheDocument();
+  expect(screen.getByText("best sentence score 0.412")).toBeInTheDocument();
+});
+
+test("a count shows no empty citations section and a singular tool call", () => {
+  render(
+    <AnswerView
+      response={{ ...response({ action: "count_tickets", count: 1, text: "1 ticket matches no filters: T-101." }), retrieval: null }}
+      onSelectTicket={() => {}}
+    />,
+  );
+  expect(screen.queryByText(/Citations/)).not.toBeInTheDocument();
+  expect(screen.getByText(/1 tool call$/)).toBeInTheDocument();
 });

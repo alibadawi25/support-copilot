@@ -1,6 +1,6 @@
 from support_copilot.composer import compose
 from support_copilot.retrieval.tickets import get_ticket
-from support_copilot.schemas import KnowledgeHit, KnowledgeSearchResult, ScoredSentence
+from support_copilot.schemas import KnowledgeHit, KnowledgeSearchResult, ScoredSentence, TicketCount, TicketFilter
 
 PENDING = "If the payment is pending, do not ask the customer to submit another payment"
 RETRY = "If no transaction exists after the gateway check, the customer may retry once."
@@ -99,16 +99,40 @@ def test_similar_tickets_with_no_match_is_insufficient_evidence():
     assert answer.state == "insufficient_evidence" and answer.reason
 
 
-def test_summary_falls_back_to_guidance_when_no_sentence_is_a_check(conn, index):
-    # KB-03 is phrased "If a customer still has a backup code, they can ..." and has
-    # no check/confirm wording. The retrieved guidance must still be shown and cited.
+def test_summary_lists_both_branches_as_facts_still_needed(conn, index):
+    # KB-03 has no check/confirm wording; its advice depends on whether the customer
+    # has a backup code. T-104 does not say, so both "If ..." sentences are listed,
+    # including the one that shares no words with the ticket.
     ticket = get_ticket(conn, "T-104")
     result = index.search(compose.ticket_query(ticket), category=ticket.category)
     answer = compose.compose_summarize_ticket(ticket, result)
-    assert "Relevant guidance (from the knowledge base):" in answer.text
-    assert "saved backup code" in answer.text
-    assert "No documented checklist" not in answer.text
-    assert [c.source_id for c in answer.citations] == ["T-104", "KB-03"]
+    facts = answer.text.split(compose.FACTS_HEADING)[1]
+    assert "If a customer still has a saved backup code" in facts
+    assert "If no backup code is available" in facts
+    assert [c.chunk_id for c in answer.citations[1:]] == ["KB-03#chunk-1", "KB-03#chunk-2"]
+
+
+def test_summary_lists_checks_to_make(conn, index):
+    ticket = get_ticket(conn, "T-101")
+    result = index.search(compose.ticket_query(ticket), category=ticket.category)
+    facts = compose.compose_summarize_ticket(ticket, result).text.split(compose.FACTS_HEADING)[1]
+    assert "check the order and payment status using the transaction reference" in facts
+    assert RETRY in facts  # the other branch of KB-01
+
+
+def test_one_citation_per_chunk_quoting_consecutive_sentences():
+    first, second = "If a code exists, use it once.", "Then enroll the new device."
+    answer = compose.compose_search_knowledge(_result((first, 0.4), (second, 0.3)))
+    assert len(answer.citations) == 1
+    assert answer.citations[0].quote == f"{first} {second}"
+    assert answer.citations[0].score == 0.4
+
+
+def test_count_text_is_singular_or_plural_and_names_the_keyword():
+    one = compose.compose_count_tickets(TicketFilter(keyword="checkout"), TicketCount(count=1, ticket_ids=["T-101"]))
+    none = compose.compose_count_tickets(TicketFilter(), TicketCount(count=0, ticket_ids=[]))
+    assert one.text == '1 ticket matches mentioning "checkout": T-101.'
+    assert none.text == "0 tickets match no filters: none."
 
 
 def test_summary_says_so_when_nothing_was_retrieved(conn, index):

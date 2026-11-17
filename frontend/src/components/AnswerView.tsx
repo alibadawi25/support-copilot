@@ -80,11 +80,14 @@ export function AnswerView({ response, onSelectTicket }: Props) {
         </p>
       )}
 
-      <div className="section-head">
-        <h3>Citations ({answer.citations.length})</h3>
-      </div>
+      {/* A count is read straight from the database: it has no sources to cite. */}
+      {answer.count === null && (
+        <div className="section-head">
+          <h3>Citations ({answer.citations.length})</h3>
+        </div>
+      )}
       {retrieval && <RetrievalMeter retrieval={retrieval} />}
-      {answer.citations.length === 0 ? (
+      {answer.count !== null ? null : answer.citations.length === 0 ? (
         <p className="muted small">No sources cited.</p>
       ) : (
         <ul className="citations">
@@ -105,7 +108,9 @@ export function AnswerView({ response, onSelectTicket }: Props) {
       )}
 
       <details className="how">
-        <summary>How this was answered · {tool_trace.length} tool calls</summary>
+        <summary>
+          How this was answered · {tool_trace.length} tool {tool_trace.length === 1 ? "call" : "calls"}
+        </summary>
         <ol className="trace">
           {tool_trace.map((call, i) => (
             <li key={i}>
@@ -179,7 +184,7 @@ function CitationCard({ ref, number, citation: c, active, barWidth, onOpenTicket
       {c.score !== null && (
         <div className="score-row">
           <span className="muted small">
-            {c.source_type === "article" ? "sentence score" : "bm25 score"} {score(c.score)}
+            {c.source_type === "article" ? "best sentence score" : "bm25 score"} {score(c.score)}
           </span>
           {barWidth !== null && (
             <span className="score-bar" aria-hidden="true">

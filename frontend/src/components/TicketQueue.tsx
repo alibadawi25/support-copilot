@@ -102,6 +102,7 @@ export function TicketQueue({ filter, onFilter, tickets, selectedId, onSelect, o
                   type="button"
                   className="ticket-row"
                   data-id={t.id}
+                  aria-label={`${t.id}: ${t.title}. ${t.priority} priority, ${t.status}${t.reviewed_at ? ", reviewed" : ""}`}
                   aria-current={t.id === selectedId}
                   onClick={() => onSelect(t.id)}
                 >

@@ -100,7 +100,7 @@ def test_checker_flags_a_quote_tagged_with_the_wrong_chunk(good_answer, sources)
 def test_checker_flags_a_fabricated_citation(good_answer, sources):
     fake = good_answer.citations[0].model_copy(update={"quote": "Refunds are always approved."})
     tampered = good_answer.model_copy(update={"citations": [fake]})
-    assert any("not a whole sentence" in p for p in grounding_violations(tampered, sources))
+    assert any("not whole sentences" in p for p in grounding_violations(tampered, sources))
 
 
 # ---- must_not_claim, for every action that can speak about the case's ticket --

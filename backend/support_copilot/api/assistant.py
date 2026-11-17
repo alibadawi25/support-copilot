@@ -53,13 +53,32 @@ class _Flow:
         return result, info
 
 
-def _ticket_query(ticket: TicketView) -> str:
-    return compose.ticket_query(ticket)[:MAX_QUERY_CHARS]
+def _ticket_query(ticket: TicketView, agent_text: str | None = None) -> str:
+    # Ticket text comes first, so a long agent note is what gets trimmed.
+    return compose.ticket_query(ticket, agent_text)[:MAX_QUERY_CHARS]
 
 
 async def _search_knowledge(req: AssistantRequest, flow: _Flow) -> Result:
     result, info = await flow.knowledge(req.query, req.category)
     return compose.compose_search_knowledge(result), info
+
+
+async def _ticket_knowledge(
+    flow: _Flow, ticket: TicketView, agent_text: str | None
+) -> tuple[KnowledgeSearchResult, RetrievalInfo]:
+    """Knowledge for a ticket. The agent's text can sharpen the search, never weaken it.
+
+    The ticket's own text is always searched. If the agent typed something, the
+    ticket text plus that is searched too and kept only if it scores higher: an
+    instruction like "Draft a reply explaining next steps" adds words no article
+    uses, which would otherwise pull a good match under the threshold.
+    """
+    best = await flow.knowledge(_ticket_query(ticket), ticket.category)
+    if agent_text:
+        combined = await flow.knowledge(_ticket_query(ticket, agent_text), ticket.category)
+        if (combined[0].top_score or 0) > (best[0].top_score or 0):
+            best = combined
+    return best
 
 
 async def _summarize_ticket(req: AssistantRequest, flow: _Flow) -> Result:
@@ -70,7 +89,7 @@ async def _summarize_ticket(req: AssistantRequest, flow: _Flow) -> Result:
 
 async def _draft_reply(req: AssistantRequest, flow: _Flow) -> Result:
     ticket = await flow.ticket(req.ticket_id)
-    result, info = await flow.knowledge(req.query or _ticket_query(ticket), ticket.category)
+    result, info = await _ticket_knowledge(flow, ticket, req.query)
     return compose.compose_draft_reply(ticket, result), info
 
 
@@ -78,7 +97,7 @@ async def _similar_tickets(req: AssistantRequest, flow: _Flow) -> Result:
     query = req.query
     if req.ticket_id:
         ticket = await flow.ticket(req.ticket_id)
-        query = query or _ticket_query(ticket)
+        query = _ticket_query(ticket, req.query)
     data = await flow.call(
         "search_resolved_tickets",
         {"query": query, "exclude_ticket_id": req.ticket_id, "category": req.category, "limit": TOP_K},
@@ -89,7 +108,7 @@ async def _similar_tickets(req: AssistantRequest, flow: _Flow) -> Result:
 
 async def _count_tickets(req: AssistantRequest, flow: _Flow) -> Result:
     filters = req.filters or TicketFilter()
-    data = await flow.call("count_tickets", filters.model_dump())
+    data = await flow.call("count_tickets", filters.model_dump(exclude_none=True))
     return compose.compose_count_tickets(filters, TicketCount.model_validate(data)), None
 
 

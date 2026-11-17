@@ -1,6 +1,8 @@
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import {
   ACTIONS,
+  MAX_KEYWORD_CHARS,
+  MAX_QUERY_CHARS,
   type Action,
   type ApiError,
   type AssistantRequest,
@@ -20,10 +22,10 @@ import { Select } from "./Select";
 
 const ACTION_INFO: Record<Action, { label: string; hint: string; icon: IconName }> = {
   search_knowledge: { label: "Search KB", icon: "book", hint: "Answer a question with quoted knowledge-base sentences." },
-  summarize_ticket: { label: "Summarize", icon: "list", hint: "Condense the selected ticket and list what to confirm." },
+  summarize_ticket: { label: "Summarize", icon: "list", hint: "Condense the selected ticket and list the key facts still needed." },
   similar_tickets: { label: "Similar", icon: "layers", hint: "Find resolved tickets like this one and how they were fixed." },
   draft_reply: { label: "Draft reply", icon: "pen", hint: "Write an editable reply from documented guidance. Never sent." },
-  count_tickets: { label: "Count", icon: "hash", hint: "Count tickets that match the filters." },
+  count_tickets: { label: "Count", icon: "hash", hint: "Count tickets that match the filters and mention the given words." },
 };
 
 // Which inputs each action shows. The server decides what is *required* (422).
@@ -50,6 +52,8 @@ export function AssistantPanel({ ticketId, onSelectTicket }: Props) {
   const [filters, setFilters] = useState<TicketFilter>({});
   const [run, setRun] = useState<Run>({ status: "idle" });
   const latest = useRef(0); // only the newest request may update the panel
+  const queryId = useId();
+  const keywordId = useId();
 
   // An answer about one ticket must not stay on screen next to another ticket.
   useEffect(() => {
@@ -63,7 +67,7 @@ export function AssistantPanel({ ticketId, onSelectTicket }: Props) {
     if (USES_QUERY.includes(action) && query.trim()) req.query = query;
     if (USES_CATEGORY.includes(action) && category) req.category = category;
     if (action === "count_tickets") {
-      req.filters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
+      req.filters = Object.fromEntries(Object.entries(filters).filter(([, v]) => v?.trim()));
     }
     return req;
   }
@@ -133,17 +137,23 @@ export function AssistantPanel({ ticketId, onSelectTicket }: Props) {
             ))}
 
           {USES_QUERY.includes(action) && (
-            <label className="field">
-              <span>
-                {action === "search_knowledge" ? "Question" : "Question (optional — defaults to the ticket text)"}
-              </span>
+            <div className="field">
+              <label htmlFor={queryId}>
+                {action === "search_knowledge" ? "Question" : "Extra detail (optional — added to the ticket text)"}
+              </label>
               <textarea
+                id={queryId}
                 rows={3}
                 value={query}
+                maxLength={MAX_QUERY_CHARS}
+                aria-describedby={`${queryId}-count`}
                 placeholder="e.g. Customer was charged twice for one order"
                 onChange={(e) => setQuery(e.target.value)}
               />
-            </label>
+              <span id={`${queryId}-count`} className="char-count">
+                {query.length} / {MAX_QUERY_CHARS}
+              </span>
+            </div>
           )}
 
           {USES_CATEGORY.includes(action) && (
@@ -155,6 +165,17 @@ export function AssistantPanel({ ticketId, onSelectTicket }: Props) {
               <Select label="Status" value={filters.status ?? ""} options={STATUSES} onChange={setFilter("status")} />
               <Select label="Priority" value={filters.priority ?? ""} options={PRIORITIES} onChange={setFilter("priority")} />
               <Select label="Category" value={filters.category ?? ""} options={CATEGORIES} onChange={setFilter("category")} />
+              <div className="field field-wide">
+                <label htmlFor={keywordId}>Mentions (optional — every word must appear)</label>
+                <input
+                  id={keywordId}
+                  type="text"
+                  value={filters.keyword ?? ""}
+                  maxLength={MAX_KEYWORD_CHARS}
+                  placeholder="e.g. checkout"
+                  onChange={(e) => setFilter("keyword")(e.target.value)}
+                />
+              </div>
             </div>
           )}
 

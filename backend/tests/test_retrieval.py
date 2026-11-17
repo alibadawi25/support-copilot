@@ -82,3 +82,21 @@ def test_unseen_query_words_lower_the_score(index):
     assert index._coverage("pending authorization") == 1.0  # every word known: score untouched
     assert index._coverage("zzz qqq") == 0.0
 
+
+
+def test_other_chunks_of_an_accepted_article_come_along(index):
+    # The query matches KB-03's fallback step well and its main backup-code step weakly.
+    result = index.search("account recovery after enabling multi-factor authentication")
+    assert [h.chunk_id for h in result.hits] == ["KB-03#chunk-2", "KB-03#chunk-1"]
+    assert result.hits[1].score < result.threshold
+
+
+def test_count_keyword_requires_every_word(conn):
+    def ids(**f):
+        return count_tickets(conn, TicketFilter(**f)).ticket_ids
+
+    assert ids(status="open", priority="high", keyword="checkout") == ["T-101"]
+    assert ids(keyword="checkout") == ["T-101", "T-102", "T-103"]
+    assert ids(keyword="checkout pending") == ["T-101", "T-102"]  # T-103 never says pending
+    assert ids(keyword="the") == []  # only stop words: nothing to mention
+    assert ids(keyword='checkout" OR "") ; DROP') == ids(keyword="checkout drop")  # syntax is stripped

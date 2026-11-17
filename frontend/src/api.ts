@@ -25,7 +25,11 @@ export interface TicketFilter {
   status?: string;
   priority?: string;
   category?: string;
+  keyword?: string; // count_tickets only: every word must appear in the ticket
 }
+
+export const MAX_QUERY_CHARS = 500; // contracts.py MAX_QUERY_CHARS
+export const MAX_KEYWORD_CHARS = 100; // schemas.py MAX_KEYWORD_CHARS
 
 export interface TicketSummary {
   id: string;

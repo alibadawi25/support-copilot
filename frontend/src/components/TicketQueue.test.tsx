@@ -54,3 +54,9 @@ test("an empty result offers to clear the search", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
   expect(screen.getByText("3")).toBeInTheDocument();
 });
+
+test("filters and ticket rows have accessible names", () => {
+  render(<Harness />);
+  expect(screen.getByLabelText("Status")).toHaveDisplayValue("Any status");
+  expect(screen.getByRole("button", { name: "T-101: Card declined. high priority, open" })).toBeInTheDocument();
+});

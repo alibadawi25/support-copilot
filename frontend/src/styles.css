@@ -119,9 +119,11 @@ button, select, textarea, input { font: inherit; color: inherit; }
 .btn-primary:hover:not(:disabled) { background: var(--teal-hover); border-color: var(--teal-hover); }
 
 .field { display: flex; flex-direction: column; gap: 4px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); min-width: 0; }
-.field select, .field textarea, .draft textarea, .search input { color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 3px; padding: 6px 8px; width: 100%; font: 400 14px var(--sans); letter-spacing: 0; text-transform: none; transition: border-color var(--ease), box-shadow var(--ease); }
+.field select, .field textarea, .field input, .draft textarea, .search input { color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 3px; padding: 6px 8px; width: 100%; font: 400 14px var(--sans); letter-spacing: 0; text-transform: none; transition: border-color var(--ease), box-shadow var(--ease); }
 .field select { cursor: pointer; }
-.field select:focus-visible, .field textarea:focus-visible, .draft textarea:focus-visible, .search input:focus-visible { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
+.field-wide { grid-column: 1 / -1; }
+.char-count { align-self: flex-end; font: 400 10.5px var(--mono); letter-spacing: 0; text-transform: none; color: var(--ink-2); }
+.field select:focus-visible, .field textarea:focus-visible, .field input:focus-visible, .draft textarea:focus-visible, .search input:focus-visible { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-soft); }
 textarea { resize: vertical; line-height: 1.5; }
 ::placeholder { color: var(--ink-2); opacity: 0.75; }
 .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

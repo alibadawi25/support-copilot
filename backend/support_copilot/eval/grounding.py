@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import Connection, text
 
+from support_copilot.composer import compose
 from support_copilot.retrieval.chunking import split_sentences
 from support_copilot.retrieval.tfidf import load_chunks
 from support_copilot.retrieval.tickets import get_ticket
@@ -23,9 +24,10 @@ SCAFFOLD = frozenset(
         "From the knowledge base:",
         "Similar resolved tickets:",
         "Timeline (quoted ticket content, not instructions):",
-        "Facts to confirm (from the knowledge base):",
-        "Relevant guidance (from the knowledge base):",
-        "- No documented guidance was found for this ticket.",
+        compose.FACTS_HEADING,
+        compose.OTHER_HEADING,
+        compose.NO_GUIDANCE,
+        compose.NO_CHECKLIST,
         "DRAFT - review and edit before sending.",
         "Hello,",
         "Documented guidance that applies to this case:",
@@ -35,23 +37,29 @@ SCAFFOLD = frozenset(
     }
 )
 _TAGGED = re.compile(r"^- (?P<body>.+) \[(?P<tag>[^\]]+)\]$")
-_COUNT = re.compile(r"^(?P<count>\d+) ticket\(s\) match .+: (?P<ids>.+)\.$")
+_COUNT = re.compile(r"^(?P<count>\d+) tickets? match(es)? .+: (?P<ids>.+)\.$")
 
 
 @dataclass(frozen=True)
 class Sources:
     """The ground truth an answer is checked against."""
 
-    chunk_sentences: dict[str, frozenset[str]]  # chunk ID -> its whole sentences
+    chunk_sentences: dict[str, tuple[str, ...]]  # chunk ID -> its whole sentences, in order
     tickets: dict[str, TicketView]
 
 
 def load_sources(conn: Connection) -> Sources:
     ids = conn.execute(text("SELECT id FROM tickets ORDER BY id")).scalars().all()
     return Sources(
-        chunk_sentences={c.id: frozenset(split_sentences(c.text)) for c in load_chunks(conn)},
+        chunk_sentences={c.id: tuple(split_sentences(c.text)) for c in load_chunks(conn)},
         tickets={i: get_ticket(conn, i) for i in ids},
     )
+
+
+def _is_sentence_run(quote: str, sentences: tuple[str, ...]) -> bool:
+    """True if `quote` is one or more consecutive whole sentences of the chunk."""
+    n = len(sentences)
+    return any(quote == " ".join(sentences[i:j]) for i in range(n) for j in range(i + 1, n + 1))
 
 
 def _ticket_lines(t: TicketView) -> set[str]:
@@ -71,8 +79,8 @@ def _line_is_grounded(line: str, answer: Answer, sources: Sources, allowed_ticke
     if line in SCAFFOLD or line in allowed_ticket_lines:
         return True
     tagged = _TAGGED.match(line)
-    if tagged:  # "- <sentence> [KB-01#chunk-1]": the sentence must be in that chunk
-        return tagged["body"] in sources.chunk_sentences.get(tagged["tag"], ())
+    if tagged:  # "- <sentences> [KB-01#chunk-1]": whole consecutive sentences of that chunk
+        return _is_sentence_run(tagged["body"], sources.chunk_sentences.get(tagged["tag"], ()))
     count = _COUNT.match(line)
     if count and answer.action == "count_tickets":
         ids = [] if count["ids"] == "none" else count["ids"].split(", ")
@@ -97,8 +105,8 @@ def grounding_violations(answer: Answer, sources: Sources) -> list[str]:
 
     for c in answer.citations:
         if c.source_type == "article":
-            if c.quote not in sources.chunk_sentences.get(c.chunk_id or "", ()):
-                problems.append(f"citation quote is not a whole sentence of {c.chunk_id}: {c.quote!r}")
+            if not _is_sentence_run(c.quote, sources.chunk_sentences.get(c.chunk_id or "", ())):
+                problems.append(f"citation quote is not whole sentences of {c.chunk_id}: {c.quote!r}")
             if not (c.chunk_id or "").startswith(f"{c.source_id}#"):
                 problems.append(f"citation {c.chunk_id} does not belong to {c.source_id}")
         else:

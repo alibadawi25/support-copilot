@@ -19,20 +19,21 @@ _WORD = re.compile(r"[A-Za-z0-9]+")
 MIN_BM25_SCORE = 2.0
 
 
-def build_fts_query(user_text: str) -> str | None:
+def build_fts_query(user_text: str, operator: str = "OR") -> str | None:
     """Turn free text into a safe FTS5 MATCH expression, or None if nothing is searchable.
 
     Raw text cannot be passed to MATCH: `-`, `"`, `^` and words like AND/NEAR are
     query syntax. We keep only alphanumeric words and quote each one, so every
-    term is a plain string. Terms are OR-joined because FTS5 ANDs by default and
-    a whole sentence would then match nothing; bm25 ranks tickets sharing more
-    (and rarer) terms first.
+    term is a plain string. Similarity search ORs the terms, because a whole
+    sentence ANDed would match nothing; bm25 then ranks tickets sharing more (and
+    rarer) terms first. A count keyword ANDs them: "checkout timeout" means both.
     """
+    assert operator in ("OR", "AND")  # fixed by our code, never by the caller's text
     terms: list[str] = []
     for word in _WORD.findall(user_text.lower()):
         if len(word) > 1 and word not in STOP_WORDS and word not in terms:
             terms.append(word)
-    return " OR ".join(f'"{t}"' for t in terms) if terms else None
+    return f" {operator} ".join(f'"{t}"' for t in terms) if terms else None
 
 
 def search_resolved_tickets(
@@ -78,9 +79,17 @@ def search_resolved_tickets(
 
 def count_tickets(conn: Connection, filters: TicketFilter) -> TicketCount:
     # Column names are fixed here; values are validated enums bound as parameters.
-    active = filters.model_dump(exclude_none=True)
-    where = " AND ".join(f"{column} = :{column}" for column in active) or "1 = 1"
-    ids = conn.execute(text(f"SELECT id FROM tickets WHERE {where} ORDER BY id"), active).scalars().all()
+    active = filters.model_dump(exclude_none=True, exclude={"keyword"})
+    clauses = [f"{column} = :{column}" for column in active]
+    params: dict = dict(active)
+    if filters.keyword is not None:
+        match = build_fts_query(filters.keyword, operator="AND")
+        if match is None:  # only stop words or punctuation: nothing can be mentioned
+            return TicketCount(count=0, ticket_ids=[])
+        clauses.append("id IN (SELECT ticket_id FROM tickets_fts WHERE tickets_fts MATCH :match)")
+        params["match"] = match
+    where = " AND ".join(clauses) or "1 = 1"
+    ids = conn.execute(text(f"SELECT id FROM tickets WHERE {where} ORDER BY id"), params).scalars().all()
     return TicketCount(count=len(ids), ticket_ids=list(ids))
 
 

@@ -56,11 +56,14 @@ In the UI: pick a ticket in the queue, choose an action in the assistant panel, 
 | Try | Expect |
 |---|---|
 | T-101 → Draft reply | A draft marked "not sent", quoting KB-01 and KB-02. It says not to ask for another payment while one is pending. |
+| T-104 → Draft reply, extra detail `Draft a reply explaining next steps` | A draft quoting KB-03. The ticket text is always searched; typed text can only raise the score. |
+| T-104 → Summarize ticket | "Key facts we still need" lists both KB-03 branches: with and without a backup code. |
 | Search knowledge: `lost authenticator after replacing phone; backup code and enroll a new device`, category `account_access` | Answer cited to KB-03 |
 | Search knowledge: `Does the product reimburse a bank decline fee?`, category `billing` | Insufficient evidence. KB-06 matches, but only in a sentence saying it does not cover the topic. |
 | Search knowledge: `Configure scheduled SFTP delivery of reports to an external server`, category `integrations` | Insufficient evidence. No article covers it. |
 | T-101 → Find similar resolved tickets | T-103, with its resolution |
 | Count tickets, status `open` | 7 tickets, listed by ID |
+| Count tickets, status `open`, priority `high`, mentions `checkout` | 1 ticket: T-101 |
 | T-112 → Summarize ticket | The ticket's injected instruction appears only as quoted text |
 | Draft reply with no ticket selected | The server's validation message |
 
@@ -78,7 +81,7 @@ Every response carries `run_id`, `answer` (state, text, citations), `retrieval` 
 2. `AssistantRequest` validates it. Unknown fields, unknown actions and missing per-action fields are a 422 before any tool runs.
 3. `api/assistant.py` runs the fixed flow for that action. The action alone decides which MCP tools are called. Ticket and article text only travels as tool arguments or quoted evidence.
 4. The MCP client calls the tool over stdio. The server queries SQLite on a read-only connection and returns typed evidence: chunks with scores and per-sentence scores, or tickets, or a count. It never returns answer text.
-5. `composer/compose.py` builds the answer from whole evidence sentences, in article order, each tagged with its chunk ID. If nothing clears the threshold, or the best match is a disclaimer, the state is `insufficient_evidence` with a reason and no citations.
+5. `composer/compose.py` builds the answer from whole evidence sentences, in article order, one citation per chunk (its chosen sentences as one consecutive run), each tagged with its chunk ID. If nothing clears the threshold, or the best match is a disclaimer, the state is `insufficient_evidence` with a reason and no citations.
 6. The API writes a row to `assistant_runs` (run ID, action, tools, retrieval method, state, success, duration; no query or ticket text) and returns the response.
 
 ## Retrieval and the index
@@ -86,9 +89,10 @@ Every response carries `run_id`, `answer` (state, text, citations), `retrieval` 
 - **Chunking** (`retrieval/chunking.py`): two whole sentences per chunk, no overlap. 7 articles give 15 chunks. Sentences are never cut, so a condition stays with its claim. Chunk IDs are stable: `KB-03#chunk-1`.
 - **Index build**: chunks are stored in SQLite by the seed. The TF-IDF matrix is not stored. The MCP server builds it in memory from `article_chunks` each time it starts, which takes milliseconds at this size. To rebuild after changing the data: re-run the seed, then restart the API.
 - **Vectoriser** (`retrieval/tfidf.py`): scikit-learn TF-IDF, unigrams and bigrams, sublinear TF, English stop words with negations kept. Title and tags are added to the indexed text; only the chunk's own sentences are ever quoted.
-- **Scoring**: cosine similarity, optional category filter, top 3. Query words the index has never seen count against the score, so one matching word in an off-topic question does not pass.
+- **Scoring**: cosine similarity, optional category filter, top 3. Query words the index has never seen count against the score, so one matching word in an off-topic question does not pass. Once one chunk of an article clears the threshold, that article's other chunks are kept at a floor of 0.05, so a two-chunk procedure is not cut in half.
 - **Threshold**: 0.17, chosen from the sweep below. Callers cannot lower it.
-- **Similar tickets**: SQLite FTS5 over resolved tickets, ranked by BM25, with a floor of 2.0.
+- **Similar tickets**: SQLite FTS5 over resolved tickets, ranked by BM25, with a floor of 2.0. Terms are OR-joined.
+- **Count keyword**: the same FTS5 table over all tickets, terms AND-joined: every word must appear (stemmed).
 
 ### Evaluation
 
@@ -97,22 +101,22 @@ cd backend
 uv run python -m support_copilot.eval
 ```
 
-23 labelled queries (15 answerable, 8 with no answer in the knowledge base).
+31 labelled queries (19 answerable, 12 with no answer in the knowledge base). Eight were added after review: short, blunt or one-shared-word queries near the threshold.
 
 | Ranking, unscoped | hit@1 | hit@3 | MRR |
 |---|---:|---:|---:|
-| TF-IDF cosine | 0.71 | 0.93 | 0.82 |
-| FTS5 BM25 | 0.71 | 0.93 | 0.82 |
+| TF-IDF cosine | 0.72 | 0.94 | 0.83 |
+| FTS5 BM25 | 0.67 | 0.94 | 0.81 |
 
 | Threshold | Correct | False accept | False reject | Wrong source |
 |---:|---:|---:|---:|---:|
-| 0.10 | 16 | 2 | 3 | 2 |
-| 0.15 | 18 | 0 | 4 | 1 |
-| **0.17** | 17 | 0 | 6 | 0 |
-| 0.25 | 17 | 0 | 6 | 0 |
-| 0.30 | 16 | 0 | 7 | 0 |
+| 0.10 | 21 | 4 | 3 | 3 |
+| 0.15 | 22 | 2 | 6 | 1 |
+| **0.17** | 21 | 2 | 8 | 0 |
+| 0.25 | 20 | 2 | 9 | 0 |
+| 0.30 | 20 | 1 | 10 | 0 |
 
-0.17 is the lowest setting with no false accept and no answer cited to the wrong article. The cost is six refused questions that do have an answer, all paraphrases or very short queries. 0.15 gets one more right but answers "How do I reset MFA?" from the password-reset article. The set is seven articles and hand-written queries: it shows where the index fails, not how it would score on a real knowledge base.
+0.17 is the lowest setting with no answer cited to the wrong article. 0.15 gets one more right but answers "How do I reset MFA?" from the password-reset article. The cost is eight refused questions that do have an answer, all paraphrases or very short queries. "run this SQL command" passes at 0.171 and is a correct accept: KB-07 says not to run arbitrary SQL. The two false accepts ("change the account email address" → KB-05 at 0.34, "export the report as PDF" → KB-04 at 0.26) share the topic words but not the asked-for thing. They score above T-104's own match (0.197), so no threshold removes them without refusing the supplied cases. The set is seven articles and hand-written queries: it shows where the index fails, not how it would score on a real knowledge base.
 
 ## MCP server
 
@@ -160,7 +164,7 @@ cd frontend
 npm test
 ```
 
-136 backend tests and 2 frontend tests. The ones worth reading first:
+154 backend tests and 9 frontend tests. The ones worth reading first:
 
 - `tests/test_expected_cases.py`: the 10 supplied acceptance cases.
 - `tests/test_grounding.py`: every quoted line in every answer must be an exact sentence from the database, checked over all eval queries, all tickets, hostile inputs and the API → MCP path.
@@ -185,7 +189,7 @@ AI_USAGE.md    AI tools used and what was reviewed
 
 ## Known limitations
 
-- **Lexical retrieval.** TF-IDF matches words, not meaning. "multi-factor authentication" does not match "MFA", and "charged twice" does not match "duplicate payment". The six false rejects above are this. Embeddings would close most of that gap; there is no synonym map.
+- **Lexical retrieval.** TF-IDF matches words, not meaning. "multi-factor authentication" does not match "MFA", and "charged twice" does not match "duplicate payment". The eight false rejects above are this, and so are the two false accepts in the other direction: a shared topic word passes even when the article does not cover the asked-for thing. Embeddings would close most of that gap; there is no synonym map.
 - **The threshold is tuned on 7 articles.** 0.17 and the BM25 floor of 2.0 are measured on this data pack and would need re-measuring on any other corpus.
 - **Answers are quotes, not prose.** The composer selects and orders whole sentences. It cannot merge, rephrase or answer a question whose answer spans sentences that do not score well individually. T-103 (missing receipt email) gets no draft because no article covers it.
 - **Disclaimer detection is a pattern.** Sentences like "does not define…" are recognised by a fixed list of phrasings. A disclaimer written another way would be quoted as evidence.

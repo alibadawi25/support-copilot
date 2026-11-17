@@ -24,16 +24,20 @@ class AssistantRequest(BaseModel):
     category: Category | None = None
     filters: TicketFilter | None = None  # count_tickets only
 
+    # Messages are shown to the agent as-is, so they say what to do, not which field failed.
     @model_validator(mode="after")
     def _required_fields(self) -> "AssistantRequest":
         if self.action in _NEEDS_TICKET and not self.ticket_id:
-            raise ValueError(f"{self.action} requires ticket_id")
+            raise ValueError("Select a ticket first.")
         if self.action == "search_knowledge" and not self.query:
-            raise ValueError("search_knowledge requires query")
+            raise ValueError("Type a question to search the knowledge base.")
         if self.action == "similar_tickets" and not (self.ticket_id or self.query):
-            raise ValueError("similar_tickets requires ticket_id or query")
+            raise ValueError("Select a ticket or describe the problem to find similar tickets.")
+        if self.action == "count_tickets" and self.query:
+            # Counting is filter-only; a question here would be silently ignored.
+            raise ValueError("Count uses the filters and keyword, not a question.")
         if self.filters is not None and self.action != "count_tickets":
-            raise ValueError("filters are only valid for count_tickets")
+            raise ValueError("Filters apply only to Count.")
         return self
 
 

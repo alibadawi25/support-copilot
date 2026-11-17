@@ -23,6 +23,7 @@ from support_copilot.retrieval import tickets as ticket_queries
 from support_copilot.retrieval.tfidf import KnowledgeIndex, load_chunks
 from support_copilot.schemas import (
     ArticleView,
+    MAX_KEYWORD_CHARS,
     Category,
     KnowledgeSearchResult,
     Priority,
@@ -40,6 +41,9 @@ log = logging.getLogger("support_copilot.mcp")
 Query = Annotated[str, Field(min_length=1, max_length=500, description="Free-text search query")]
 TicketId = Annotated[str, Field(pattern=r"^T-\d{1,6}$", description="Ticket ID, e.g. T-101")]
 ArticleId = Annotated[str, Field(pattern=r"^KB-\d{1,6}$", description="Article ID, e.g. KB-03")]
+Keyword = Annotated[
+    str, Field(min_length=1, max_length=MAX_KEYWORD_CHARS, description="Words the ticket must mention")
+]
 Limit = Annotated[int, Field(ge=1, le=10, description="Maximum number of results")]
 
 # Hints for clients (the SDK default advertises tools as possibly destructive).
@@ -96,9 +100,14 @@ def build_server(database: Path | None = None) -> MCPServer:
         status: Status | None = None,
         priority: Priority | None = None,
         category: Category | None = None,
+        keyword: Keyword | None = None,
     ) -> TicketCount:
-        """Count tickets matching the given filters. Returns the count and the matching IDs."""
-        filters = TicketFilter(status=status, priority=priority, category=category)
+        """Count tickets matching the given filters. Returns the count and the matching IDs.
+
+        `keyword`: every word must appear in the ticket's title, description,
+        messages or resolution (FTS5, stemmed).
+        """
+        filters = TicketFilter(status=status, priority=priority, category=category, keyword=keyword)
         with engine.connect() as conn:
             return ticket_queries.count_tickets(conn, filters)
 

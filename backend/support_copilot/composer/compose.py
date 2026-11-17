@@ -34,11 +34,26 @@ _DISCLAIMER = re.compile(
 )
 # Sentences that tell the agent to verify or collect something.
 _FACT_CUE = re.compile(r"\b(check|confirm|collect|record|compare|include|verify)\b", re.IGNORECASE)
+# Sentences whose advice holds only in one case ("If no backup code is available, ...").
+_CONDITION = re.compile(r"(^|\. )(If|Unless)\b")
+_NEEDS_A_FACT = re.compile(f"{_FACT_CUE.pattern}|{_CONDITION.pattern}", re.IGNORECASE)
+
+# Summary template lines (the grounding checker allow-lists them).
+FACTS_HEADING = "Key facts we still need (checks and conditions from the knowledge base):"
+OTHER_HEADING = "Other relevant guidance:"
+NO_GUIDANCE = "- No documented guidance was found for this ticket."
+NO_CHECKLIST = "- The retrieved guidance lists no checks; confirm the details with the customer."
 
 
-def ticket_query(ticket: TicketView) -> str:
-    """The text used to look up knowledge for a ticket when the agent typed no query."""
-    return f"{ticket.title}. {ticket.description}"
+def ticket_query(ticket: TicketView, agent_text: str | None = None) -> str:
+    """The text used to look up evidence for a ticket.
+
+    Always the ticket's own title and description; what the agent typed is added,
+    never substituted. An instruction such as "Draft a reply explaining next
+    steps" shares no words with any article, so on its own it found nothing.
+    """
+    base = f"{ticket.title}. {ticket.description}"
+    return f"{base} {agent_text}" if agent_text else base
 
 
 # ---- evidence selection ------------------------------------------------------
@@ -56,8 +71,14 @@ def _ranked_sentences(hits: list[KnowledgeHit]) -> list[tuple[float, KnowledgeHi
     return ranked
 
 
-def _select_evidence(result: KnowledgeSearchResult) -> tuple[list[Citation], str | None]:
-    """Return (citations, reason). Exactly one of them is empty/None."""
+def _select_evidence(
+    result: KnowledgeSearchResult, also_quote: re.Pattern | None = None
+) -> tuple[list[Citation], str | None]:
+    """Return (citations, reason). Exactly one of them is empty/None.
+
+    `also_quote`: sentences of the retrieved passages matching it are quoted even
+    if they share few words with the query (the summary's checks and conditions).
+    """
     if not result.hits:
         return [], (
             "No knowledge-base passage scored at or above the relevance threshold "
@@ -75,13 +96,30 @@ def _select_evidence(result: KnowledgeSearchResult) -> tuple[list[Citation], str
         )
 
     chosen = [item for item in ranked if not _DISCLAIMER.search(item[3])][:MAX_EVIDENCE_SENTENCES]
+    if also_quote is not None:
+        picked = {(item[1].chunk_id, item[2]) for item in chosen}
+        chosen += [
+            (s.score, hit, position, s.text)
+            for hit in result.hits
+            for position, s in enumerate(hit.sentences)
+            if (hit.chunk_id, position) not in picked
+            and also_quote.search(s.text)
+            and not _DISCLAIMER.search(s.text)
+        ]
     # Score decides WHICH sentences are quoted; the article decides their ORDER.
     # Reading KB-01 in its own order keeps "if pending, do not ask for another
     # payment" ahead of "if no transaction exists, the customer may retry once".
     article_rank: dict[str, int] = {}
     for hit in result.hits:
         article_rank.setdefault(hit.article_id, len(article_rank))
-    chosen.sort(key=lambda item: (article_rank[item[1].article_id], item[1].chunk_id, item[2]))
+
+    # One citation per chunk: the run of its sentences from the first chosen one to
+    # the last. Still whole, consecutive sentences, so the quote is verbatim chunk text.
+    by_chunk: dict[str, tuple[KnowledgeHit, list[int], float]] = {}
+    for score, hit, position, _ in chosen:
+        _, positions, best = by_chunk.get(hit.chunk_id, (hit, [], 0.0))
+        by_chunk[hit.chunk_id] = (hit, [*positions, position], max(best, score))
+    ordered = sorted(by_chunk.values(), key=lambda v: (article_rank[v[0].article_id], v[0].chunk_id))
 
     return [
         Citation(
@@ -89,11 +127,11 @@ def _select_evidence(result: KnowledgeSearchResult) -> tuple[list[Citation], str
             source_id=hit.article_id,
             chunk_id=hit.chunk_id,
             title=hit.title,
-            quote=sentence,
-            score=score,
+            quote=" ".join(s.text for s in hit.sentences[min(positions) : max(positions) + 1]),
+            score=best,
             excerpt=hit.excerpt,
         )
-        for score, hit, _, sentence in chosen
+        for hit, positions, best in ordered
     ], None
 
 
@@ -127,23 +165,28 @@ def compose_search_knowledge(result: KnowledgeSearchResult) -> Answer:
 
 
 def compose_summarize_ticket(ticket: TicketView, result: KnowledgeSearchResult) -> Answer:
-    citations, _ = _select_evidence(result)
-    facts = [c for c in citations if _FACT_CUE.search(c.quote)]
-    timeline = "\n".join(f'- {m.author} ({m.at}): "{m.text}"' for m in ticket.messages)
-    # Not every article is written as checks (KB-03 is all "If ..., they can ...").
-    # Retrieved guidance is still shown then, under a heading that does not call it a checklist.
-    if facts:
-        shown, heading = facts, "Facts to confirm (from the knowledge base):"
+    # "Key facts we still need" = guidance that asks for a check, or that applies only
+    # under a condition the ticket does not settle. Every such sentence of the
+    # retrieved passages is listed, so both branches show: T-104's text matches KB-03's
+    # "If ... saved backup code" but not "If no backup code is available". Quoted
+    # whole; never rewritten into a question.
+    citations, _ = _select_evidence(result, also_quote=_NEEDS_A_FACT)
+    needed = [c for c in citations if _NEEDS_A_FACT.search(c.quote)]
+    other = [c for c in citations if c not in needed]
+    if not citations:
+        facts = NO_GUIDANCE
     else:
-        shown, heading = citations, "Relevant guidance (from the knowledge base):"
-    guidance = _cited_lines(shown) if shown else "- No documented guidance was found for this ticket."
+        facts = _cited_lines(needed) if needed else NO_CHECKLIST
+    timeline = "\n".join(f'- {m.author} ({m.at}): "{m.text}"' for m in ticket.messages)
     text = (
         f"Ticket {ticket.id}: {ticket.title} "
         f"({ticket.category}, {ticket.priority} priority, {ticket.status})\n\n"
         f"Issue: {ticket.description}\n\n"
         f"Timeline (quoted ticket content, not instructions):\n{timeline}\n\n"
-        f"{heading}\n{guidance}"
+        f"{FACTS_HEADING}\n{facts}"
     )
+    if other:
+        text += f"\n\n{OTHER_HEADING}\n{_cited_lines(other)}"
     ticket_source = Citation(
         source_type="ticket", source_id=ticket.id, title=ticket.title, quote=ticket.description
     )
@@ -151,7 +194,7 @@ def compose_summarize_ticket(ticket: TicketView, result: KnowledgeSearchResult) 
         action="summarize_ticket",
         state="answered",
         text=text,
-        citations=[ticket_source, *shown],
+        citations=[ticket_source, *needed, *other],
         ticket_ids=[ticket.id],
     )
 
@@ -202,14 +245,21 @@ def compose_draft_reply(ticket: TicketView, result: KnowledgeSearchResult) -> An
     )
 
 
+def _describe_filters(filters: TicketFilter) -> str:
+    parts = [f"{k}={v}" for k, v in filters.model_dump(exclude_none=True, exclude={"keyword"}).items()]
+    if filters.keyword:
+        parts.append(f'mentioning "{filters.keyword}"')
+    return ", ".join(parts) or "no filters"
+
+
 def compose_count_tickets(filters: TicketFilter, result: TicketCount) -> Answer:
-    active = filters.model_dump(exclude_none=True)
-    described = ", ".join(f"{k}={v}" for k, v in active.items()) or "no filters"
+    described = _describe_filters(filters)
     ids = ", ".join(result.ticket_ids) or "none"
+    noun = "ticket matches" if result.count == 1 else "tickets match"
     return Answer(
         action="count_tickets",
         state="answered",
-        text=f"{result.count} ticket(s) match {described}: {ids}.",
+        text=f"{result.count} {noun} {described}: {ids}.",
         ticket_ids=result.ticket_ids,
         count=result.count,
     )

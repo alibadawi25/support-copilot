@@ -18,6 +18,9 @@ from support_copilot.schemas import KnowledgeHit, KnowledgeSearchResult, ScoredS
 # The weakest right ones are a paraphrase at 0.166 (refused) and T-104 at 0.197.
 DEFAULT_THRESHOLD = 0.17
 DEFAULT_TOP_K = 3
+# A chunk of an article that already cleared the threshold is kept at this lower bar
+# (same floor the composer uses for quotable sentences).
+SIBLING_MIN_SCORE = 0.05
 
 # sklearn's English list drops negations. We keep them so "do not ask" and
 # "not a completed charge" stay distinguishable as bigrams.
@@ -71,6 +74,18 @@ class KnowledgeIndex:
             if category is None or chunk.category == category
         ]
         candidates.sort(key=lambda pair: (-pair[0], pair[1].id))  # id breaks ties deterministically
+        top_score = round(candidates[0][0], 4) if candidates else None
+
+        # Articles are split into two-sentence chunks, so one procedure can span two
+        # chunks: "account recovery after enabling MFA" matches KB-03's fallback step
+        # (0.22) but not its main backup-code step (0.07). Once an article clears the
+        # threshold, its other chunks need only share some query words to come along.
+        accepted = {chunk.article_id for score, chunk in candidates if score >= threshold}
+        candidates = [
+            (score, chunk)
+            for score, chunk in candidates
+            if score >= threshold or (chunk.article_id in accepted and score >= SIBLING_MIN_SCORE)
+        ]
 
         hits = [
             KnowledgeHit(
@@ -83,13 +98,8 @@ class KnowledgeIndex:
                 sentences=self._score_sentences(query_vec, chunk.text),
             )
             for score, chunk in candidates[:top_k]
-            if score >= threshold
         ]
-        return KnowledgeSearchResult(
-            hits=hits,
-            threshold=threshold,
-            top_score=round(candidates[0][0], 4) if candidates else None,
-        )
+        return KnowledgeSearchResult(hits=hits, threshold=threshold, top_score=top_score)
 
     def _coverage(self, query: str) -> float:
         """Share of the query's weight that the index knows, between 0 and 1.

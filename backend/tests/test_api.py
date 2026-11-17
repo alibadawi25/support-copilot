@@ -114,6 +114,31 @@ def test_count_tickets_with_filters(client):
     assert data["retrieval"] is None
 
 
+def test_draft_reply_still_uses_the_ticket_when_the_agent_types_an_instruction(client):
+    # On its own this text shares no word with any article and scored 0.
+    data = run(client, action="draft_reply", ticket_id="T-104", query="Draft a reply explaining next steps").json()
+    assert data["answer"]["state"] == "answered"
+    assert {c["source_id"] for c in data["answer"]["citations"]} == {"KB-03"}
+    assert [c["tool"] for c in data["tool_trace"]] == ["get_ticket", "search_knowledge", "search_knowledge"]
+
+
+def test_count_tickets_with_a_keyword(client):
+    data = run(client, action="count_tickets", filters={"status": "open", "priority": "high", "keyword": "checkout"}).json()
+    assert data["answer"]["count"] == 1 and data["answer"]["ticket_ids"] == ["T-101"]
+
+
+def test_count_rejects_a_question_it_would_ignore(client):
+    response = run(client, action="count_tickets", query="How many open high-priority tickets mention checkout?")
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Count uses the filters and keyword, not a question."
+
+
+def test_validation_errors_do_not_echo_the_input(client):
+    detail = run(client, action="search_knowledge", query="x" * 501).json()["detail"]
+    assert "x" * 50 not in str(detail)
+    assert set(detail[0]) == {"loc", "msg", "type"}
+
+
 # ---- rejected requests -------------------------------------------------------
 
 
@@ -128,6 +153,7 @@ def test_count_tickets_with_filters(client):
         {"action": "summarize_ticket", "ticket_id": "1; DROP TABLE tickets"},  # malformed ID
         {"action": "count_tickets", "filters": {"assignee": "bob"}},  # unknown filter
         {"action": "count_tickets", "filters": {"status": "closed"}},  # bad filter value
+        {"action": "count_tickets", "filters": {"keyword": "x" * 101}},  # oversized keyword
         {"action": "search_knowledge", "query": "mfa", "sql": "select 1"},  # unknown field
     ],
 )
