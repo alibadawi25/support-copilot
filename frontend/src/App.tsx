@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { type TicketDetail, type TicketFilter, getTicket, listTickets } from "./api";
 import { AssistantPanel } from "./components/AssistantPanel";
-import { Icon } from "./components/Icon";
 import { TicketDetailView } from "./components/TicketDetailView";
 import { TicketQueue } from "./components/TicketQueue";
 import { useLoad } from "./useLoad";
@@ -27,10 +26,9 @@ export function App() {
   return (
     <div className="app">
       <header className="app-head">
-        <span className="brand-mark" aria-hidden="true">
-          <Icon name="shield" size={18} />
-        </span>
-        <h1>Support Copilot</h1>
+        <h1>
+          Support <em>Copilot</em>
+        </h1>
         <ul className="app-badges" aria-label="Guarantees">
           <li>Offline</li>
           <li>Evidence-only answers</li>
