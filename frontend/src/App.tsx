@@ -27,7 +27,8 @@ export function App() {
     <div className="app">
       <header className="app-head">
         <h1>
-          Support <em>Copilot</em>
+          <span className="brand-mark" aria-hidden="true" />
+          Support Copilot
         </h1>
         <ul className="app-badges" aria-label="Guarantees">
           <li>Offline</li>
